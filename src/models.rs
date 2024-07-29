@@ -1,7 +1,6 @@
+use crate::clockify::TimeEntry;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Deserialize;
-
-use crate::clockify::TimeEntry;
 
 #[derive(Deserialize)]
 pub(crate) enum HolidayType {
@@ -39,7 +38,7 @@ impl SickLeaveDay {
 #[derive(Deserialize)]
 pub(crate) struct WorkDay {
     pub date: NaiveDate,
-    items: Vec<WorkItem>,
+    pub items: Vec<WorkItem>,
 }
 
 impl WorkDay {
@@ -50,9 +49,13 @@ impl WorkDay {
     pub(crate) fn duration(&self) -> i64 {
         self.items.iter().map(|wi| wi.duration()).sum()
     }
+
+    pub(crate) fn item_count(&self) -> usize {
+        self.items.len()
+    }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub(crate) struct WorkItem {
     description: String,
     project: String,
@@ -87,6 +90,13 @@ pub(crate) enum Day {
 
 impl Day {
     pub(crate) fn date(&self) -> NaiveDate {
+        match self {
+            Self::Holiday(d) => d.date,
+            Self::Sick(d) => d.date,
+            Self::Work(d) => d.date,
+        }
+    }
+    pub(crate) fn into_date(self) -> NaiveDate {
         match self {
             Self::Holiday(d) => d.date,
             Self::Sick(d) => d.date,

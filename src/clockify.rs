@@ -29,10 +29,10 @@ impl fmt::Display for Token {
     }
 }
 
-impl Into<HeaderValue> for &Token {
-    fn into(self) -> HeaderValue {
-        HeaderValue::from_str(&self.0)
-            .unwrap_or_else(|_| panic!("Failed to transform '{}' to header!", self.0))
+impl From<&Token> for HeaderValue {
+    fn from(val: &Token) -> Self {
+        HeaderValue::from_str(&val.0)
+            .unwrap_or_else(|_| panic!("Failed to transform '{}' to header!", val.0))
     }
 }
 
