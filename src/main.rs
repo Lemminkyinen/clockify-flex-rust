@@ -7,7 +7,14 @@ use anyhow::Error;
 use chrono::{Datelike, Duration, NaiveDate, TimeDelta, Utc, Weekday};
 use itertools::Itertools;
 use models::{Holiday, HolidayType, SickLeaveDay, WorkDay};
-use std::{env, mem};
+use spinners::{Spinner, Spinners};
+use std::time::Instant;
+use std::{env, mem, result};
+use tabled::builder::Builder;
+use tabled::settings::object::Columns;
+use tabled::settings::themes::ColumnNames;
+use tabled::settings::{Color, Style};
+use tabled::Table;
 use tokio::{fs, join};
 
 async fn get_working_days(client: ClockifyClient) -> Result<Vec<WorkDay>, Error> {
@@ -77,20 +84,243 @@ async fn get_public_holidays() -> Result<Vec<Day>, Error> {
     serde_json::from_slice(content.as_ref()).map_err(Error::from)
 }
 
-fn get_all_weekdays_since(date: NaiveDate) -> Vec<NaiveDate> {
-    let yesterday = Utc::now().date_naive() - TimeDelta::days(1);
-    DateRange(date, yesterday)
-        .filter(|date| {
-            [
-                Weekday::Mon,
-                Weekday::Tue,
-                Weekday::Wed,
-                Weekday::Thu,
-                Weekday::Fri,
-            ]
-            .contains(&date.weekday())
+fn not_in_future(date: &NaiveDate) -> bool {
+    &Utc::now().date_naive() >= date
+}
+
+fn hours_to_hours_and_minutes(hours: f32) -> (i64, i64) {
+    let whole_hours = hours.trunc() as i64;
+    let minutes = ((hours - whole_hours as f32) * 60.0).round() as i64;
+    (whole_hours, minutes)
+}
+
+fn seconds_to_hours_and_minutes(seconds: i64) -> (i64, i64) {
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    (hours, minutes)
+}
+
+fn is_weekday(date: &NaiveDate) -> bool {
+    [
+        Weekday::Mon,
+        Weekday::Tue,
+        Weekday::Wed,
+        Weekday::Thu,
+        Weekday::Fri,
+    ]
+    .contains(&date.weekday())
+}
+
+fn get_all_weekdays_since(date: NaiveDate) -> impl Iterator<Item = NaiveDate> {
+    let today = Utc::now().date_naive();
+    DateRange(date, today).filter(is_weekday)
+}
+
+fn workdays_to_sec(day_count: usize) -> i64 {
+    (day_count as f32 * 7.5f32 * 3600f32) as i64
+}
+
+async fn get_items(client: ClockifyClient) -> Result<(Vec<Day>, Vec<WorkDay>, Vec<Day>), Error> {
+    let public_holidays = get_public_holidays();
+    let working_days = get_working_days(client.clone());
+    let days_off = get_days_off(client);
+    let (public_holidays, working_days, days_off) = join!(public_holidays, working_days, days_off);
+    Ok((public_holidays?, working_days?, days_off?))
+}
+
+struct Results {
+    first_working_day: NaiveDate,
+    working_day_count: usize,
+    worked_time: i64,
+    filtered_expected_working_day_count: usize,
+    public_holiday_count: usize,
+    sick_leave_day_count: usize,
+    held_flex_time_off_day_count: usize,
+    future_flex_time_off_day_count: usize,
+    balance: i64,
+}
+
+impl Results {
+    fn total_flex_time_off_day_count(&self) -> usize {
+        self.held_flex_time_off_day_count + self.future_flex_time_off_day_count
+    }
+
+    fn unfiltered_expected_working_day_count(&self) -> usize {
+        self.filtered_expected_working_day_count
+            + self.public_holiday_count
+            + self.sick_leave_day_count
+    }
+
+    fn total_weekdays_since_start(&self) -> usize {
+        self.public_holiday_count + self.sick_leave_day_count + self.working_day_count
+    }
+
+    fn weekdays_sick_leaves_filtered_since_start(&self) -> usize {
+        self.working_day_count + self.public_holiday_count
+    }
+
+    fn weekdays_public_holidays_filtered_since_start(&self) -> usize {
+        self.working_day_count + self.sick_leave_day_count
+    }
+
+    fn filtered_worked_time(&self) -> i64 {
+        self.worked_time - workdays_to_sec(self.held_flex_time_off_day_count)
+    }
+}
+
+fn calculate_results(
+    public_holidays: Vec<Day>,
+    working_days: Vec<WorkDay>,
+    days_off: Vec<Day>,
+) -> Result<Results, Error> {
+    let first_working_day = working_days
+        .iter()
+        .min_by_key(|wd| wd.date)
+        .ok_or(Error::msg("Iterator is empty"))?
+        .date;
+
+    let public_holidays = public_holidays
+        .into_iter()
+        .filter_map(|day| {
+            let date = day.date();
+            if not_in_future(&date) && is_weekday(&date) && first_working_day < date {
+                Some(date)
+            } else {
+                None
+            }
         })
-        .collect_vec()
+        .collect_vec();
+    let public_holiday_count = public_holidays.len();
+
+    let (sick_leave_days, flex_time_off_days): (Vec<Day>, Vec<Day>) = days_off
+        .into_iter()
+        .partition(|day| matches!(day, Day::Sick(_)));
+    let sick_leave_days = sick_leave_days
+        .into_iter()
+        .map(Day::into_date)
+        .collect_vec();
+    let sick_leave_day_count = sick_leave_days.len();
+    let (held_flex_time_off_days, future_flex_time_off_days): (Vec<NaiveDate>, Vec<NaiveDate>) =
+        flex_time_off_days
+            .into_iter()
+            .map(Day::into_date)
+            .partition(not_in_future);
+    let held_flex_time_off_day_count = held_flex_time_off_days.len();
+    let future_flex_time_off_day_count = future_flex_time_off_days.len();
+
+    let all_weekdays = get_all_weekdays_since(first_working_day).collect_vec();
+
+    let filtered_expected_working_days = all_weekdays
+        .into_iter()
+        .filter(|day| !public_holidays.contains(day) && !sick_leave_days.contains(day))
+        .collect_vec();
+    let filtered_expected_working_day_count = filtered_expected_working_days.len();
+
+    let expected_work_time_sec = workdays_to_sec(filtered_expected_working_day_count);
+    let flex_time_off_sec = workdays_to_sec(held_flex_time_off_day_count);
+    let total_worked_time_sec = working_days.iter().map(|wd| wd.duration()).sum::<i64>();
+    let working_day_count = working_days.len();
+
+    let balance = total_worked_time_sec - expected_work_time_sec - flex_time_off_sec;
+
+    Ok(Results {
+        first_working_day,
+        working_day_count,
+        public_holiday_count,
+        filtered_expected_working_day_count,
+        sick_leave_day_count,
+        held_flex_time_off_day_count,
+        future_flex_time_off_day_count,
+        worked_time: total_worked_time_sec,
+        balance,
+    })
+}
+
+fn build_table(r: Results) -> Table {
+    fn add_row(builder: &mut Builder, text: &str, days: Option<usize>, seconds: Option<i64>) {
+        let hours_and_minutes = if let Some(seconds) = seconds {
+            Some(seconds_to_hours_and_minutes(seconds))
+        } else {
+            days.map(|days| hours_to_hours_and_minutes(days as f32 * 7.5f32))
+        };
+
+        let hours_and_minutes_str = if let Some((hours, minutes)) = hours_and_minutes {
+            let minutes = if minutes != 0 {
+                format!(", {} minutes", minutes)
+            } else {
+                "".into()
+            };
+            &format!("{} hours{}", hours, minutes)
+        } else {
+            ""
+        };
+
+        let days_str = if let Some(days) = days {
+            &days.to_string()
+        } else {
+            ""
+        };
+
+        builder.push_record([text, days_str, hours_and_minutes_str])
+    }
+
+    let mut table_builder = Builder::default();
+
+    table_builder.push_record(["Item", "Days", "Hours & minutes"]);
+    add_row(
+        &mut table_builder,
+        "Public holidays (on weekdays)",
+        Some(r.public_holiday_count),
+        None,
+    );
+    add_row(
+        &mut table_builder,
+        "Held flex time off",
+        Some(r.held_flex_time_off_day_count),
+        None,
+    );
+    add_row(
+        &mut table_builder,
+        "Future flex time off",
+        Some(r.future_flex_time_off_day_count),
+        None,
+    );
+    add_row(
+        &mut table_builder,
+        "Sick leave time",
+        Some(r.sick_leave_day_count),
+        None,
+    );
+    add_row(
+        &mut table_builder,
+        "Expected working time (sick leaves & public holidays deducted)",
+        Some(r.filtered_expected_working_day_count),
+        None,
+    );
+    add_row(
+        &mut table_builder,
+        "Total working time",
+        Some(r.working_day_count),
+        Some(r.worked_time),
+    );
+    add_row(
+        &mut table_builder,
+        "Total working time (held flex hours deducted)",
+        Some(r.working_day_count),
+        Some(r.filtered_worked_time()),
+    );
+    add_row(
+        &mut table_builder,
+        "Work time balance",
+        None,
+        Some(r.balance),
+    );
+
+    let mut table = table_builder.build();
+    table
+        .with(Style::modern_rounded())
+        .with(ColumnNames::default().color(Color::FG_GREEN));
+    table
 }
 
 #[tokio::main]
@@ -99,86 +329,31 @@ async fn main() -> Result<(), Error> {
     let token = Token::new(&env::var("TOKEN")?);
     let client = ClockifyClient::new(token)?;
 
-    let public_holidays = get_public_holidays();
-    let working_days = get_working_days(client.clone());
-    let days_off = get_days_off(client);
+    let mut spinner = Spinner::new(Spinners::Moon, "Fetching data...".into());
+    let time = Instant::now();
+    let (public_holidays, working_days, days_off) = get_items(client).await?;
 
-    let (public_holidays, working_days, days_off) = join!(public_holidays, working_days, days_off);
+    spinner.stop_with_message(format!(
+        "{} items fetched from Clockify API! ({:.2} s)",
+        working_days.iter().map(WorkDay::item_count).sum::<usize>() + days_off.len(),
+        time.elapsed().as_secs_f32()
+    ));
 
-    let public_holidays = public_holidays?
-        .into_iter()
-        .filter_map(|day| {
-            let date = day.date();
-            if Utc::now().date_naive() > date {
-                Some(date)
-            } else {
-                None
-            }
-        })
-        .collect_vec();
-    let working_days = working_days?
-        .into_iter()
-        .filter(|day| day.date < Utc::now().date_naive())
-        .collect_vec();
-    let days_off = days_off?
-        .into_iter()
-        .filter_map(|day| {
-            let date = day.date();
-            if Utc::now().date_naive() > date {
-                Some(date)
-            } else {
-                None
-            }
-        })
-        .collect_vec();
-
-    let day_work_time = 7.5f32;
-
-    let first_working_day = working_days
-        .iter()
-        .min_by_key(|wd| wd.date)
-        .ok_or(Error::msg("Iterator is empty"))?;
-    let filtered_working_days = get_all_weekdays_since(first_working_day.date)
-        .into_iter()
-        .filter(|day| !public_holidays.contains(day) && !days_off.contains(day))
-        .collect_vec();
-    let expected_work_time = filtered_working_days.len() as f32 * day_work_time;
-    let total_worked_time = working_days.iter().map(|wd| wd.duration()).sum::<i64>();
-    let balance = total_worked_time - ((expected_work_time * 3600f32) as i64);
-
-    fn hours_to_hours_and_minutes(hours: f32) -> (i32, i32) {
-        let whole_hours = hours.trunc() as i32;
-        let minutes = ((hours - whole_hours as f32) * 60.0).round() as i32;
-        (whole_hours, minutes)
-    }
-
-    let (expected_hours, expected_minutes) = hours_to_hours_and_minutes(
-        get_all_weekdays_since(first_working_day.date).len() as f32 * day_work_time,
-    );
+    let mut spinner = Spinner::new(Spinners::Moon, "Calculating results...".into());
+    let time = Instant::now();
+    let results = calculate_results(public_holidays, working_days, days_off)?;
+    spinner.stop_with_message(format!(
+        "Items calculated! ({:.2} s)\n",
+        time.elapsed().as_secs_f32()
+    ));
 
     println!(
-        "Expected working time: {} hours, {} minutes.",
-        expected_hours, expected_minutes
+        "You have been grinding since: {:?}",
+        results.first_working_day
     );
 
-    let (expected_hours, expected_minutes) =
-        hours_to_hours_and_minutes(filtered_working_days.len() as f32 * day_work_time);
-
-    println!(
-        "Expected working time (after filtering sick leaves, public holidays and flex hours): {} hours, {} minutes.", expected_hours, expected_minutes
-    );
-    // println!("days_off: {}", days_off.len() as f32 * day_work_time);
-
-    let total_hours = total_worked_time / 3600;
-    let total_minutes = (total_worked_time % 3600) / 60i64;
-    println!(
-        "Worked time: {} hours, {} minutes.",
-        total_hours, total_minutes
-    );
-
-    let hours = balance / 3600;
-    let minutes = (balance % 3600) / 60;
-    println!("Work time balance: {hours} hours, {minutes} minutes.");
+    let table = build_table(results);
+    println!("{table}");
 
     Ok(())
 }
