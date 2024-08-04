@@ -6,6 +6,7 @@ use crate::models::{Day, WorkItem};
 use anyhow::Error;
 use chrono::{Datelike, Duration, NaiveDate, TimeDelta, Utc, Weekday};
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use models::{Holiday, HolidayType, SickLeaveDay, WorkDay};
 use spinners::{Spinner, Spinners};
 use std::time::Instant;
@@ -15,6 +16,10 @@ use tabled::settings::themes::ColumnNames;
 use tabled::settings::{Color, Style};
 use tabled::Table;
 use tokio::{fs, join};
+
+lazy_static! {
+    static ref WORK_DAY_HOURS: f32 = 7.5;
+}
 
 async fn get_working_days(client: ClockifyClient) -> Result<Vec<WorkDay>, Error> {
     let since_date = NaiveDate::from_ymd_opt(2023, 1, 1).unwrap();
@@ -90,13 +95,13 @@ fn not_in_future(date: &NaiveDate) -> bool {
 fn hours_to_hours_and_minutes(hours: f32) -> (i64, i64) {
     let whole_hours = hours.trunc() as i64;
     let minutes = ((hours - whole_hours as f32) * 60.0).round() as i64;
-    (whole_hours, minutes)
+    (whole_hours, minutes.abs())
 }
 
 fn seconds_to_hours_and_minutes(seconds: i64) -> (i64, i64) {
     let hours = seconds / 3600;
     let minutes = (seconds % 3600) / 60;
-    (hours, minutes)
+    (hours, minutes.abs())
 }
 
 fn is_weekday(date: &NaiveDate) -> bool {
@@ -116,7 +121,7 @@ fn get_all_weekdays_since(date: NaiveDate) -> impl Iterator<Item = NaiveDate> {
 }
 
 fn workdays_to_sec(day_count: usize) -> i64 {
-    (day_count as f32 * 7.5f32 * 3600f32) as i64
+    (day_count as f32 * *WORK_DAY_HOURS * 3600f32) as i64
 }
 
 async fn get_items(client: ClockifyClient) -> Result<(Vec<Day>, Vec<WorkDay>, Vec<Day>), Error> {
@@ -164,6 +169,11 @@ impl Results {
 
     fn filtered_worked_time(&self) -> i64 {
         self.worked_time - workdays_to_sec(self.held_flex_time_off_day_count)
+    }
+
+    fn balance_days(&self) -> i64 {
+        let denominator_seconds = (*WORK_DAY_HOURS * 3600.0f32) as i64;
+        self.balance / denominator_seconds
     }
 }
 
@@ -240,7 +250,7 @@ fn build_table(r: Results) -> Table {
         let hours_and_minutes = if let Some(seconds) = seconds {
             Some(seconds_to_hours_and_minutes(seconds))
         } else {
-            days.map(|days| hours_to_hours_and_minutes(days as f32 * 7.5f32))
+            days.map(|days| hours_to_hours_and_minutes(days as f32 * *WORK_DAY_HOURS))
         };
 
         let hours_and_minutes_str = if let Some((hours, minutes)) = hours_and_minutes {
@@ -308,12 +318,13 @@ fn build_table(r: Results) -> Table {
         Some(r.working_day_count),
         Some(r.filtered_worked_time()),
     );
-    add_row(
-        &mut table_builder,
+
+    let (balance_hours, balance_minutes) = seconds_to_hours_and_minutes(r.balance);
+    table_builder.push_record([
         "Work time balance",
-        None,
-        Some(r.balance),
-    );
+        &format!("{}+", r.balance_days()),
+        &format!("{balance_hours} hours, {balance_minutes} minutes"),
+    ]);
 
     let mut table = table_builder.build();
     table
