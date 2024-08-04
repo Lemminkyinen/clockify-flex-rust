@@ -35,7 +35,7 @@ impl SickLeaveDay {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub(crate) struct WorkDay {
     pub date: NaiveDate,
     pub items: Vec<WorkItem>,

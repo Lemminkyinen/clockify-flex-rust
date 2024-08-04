@@ -141,6 +141,7 @@ struct Results {
     sick_leave_day_count: usize,
     held_flex_time_off_day_count: usize,
     future_flex_time_off_day_count: usize,
+    longest_working_day: WorkDay,
     balance: i64,
 }
 
@@ -187,6 +188,12 @@ fn calculate_results(
         .min_by_key(|wd| wd.date)
         .ok_or(Error::msg("Iterator is empty"))?
         .date;
+
+    let longest_working_day = working_days
+        .iter()
+        .max_by_key(|wd| wd.duration())
+        .ok_or(Error::msg("Days iterator is empty!"))?
+        .to_owned();
 
     let public_holidays = public_holidays
         .into_iter()
@@ -240,6 +247,7 @@ fn calculate_results(
         sick_leave_day_count,
         held_flex_time_off_day_count,
         future_flex_time_off_day_count,
+        longest_working_day,
         worked_time: total_worked_time_sec,
         balance,
     })
@@ -360,6 +368,14 @@ async fn main() -> Result<(), Error> {
     println!(
         "You have been grinding since: {:?}",
         results.first_working_day
+    );
+
+    let longest_day = results.longest_working_day.clone();
+    let (hours, minutes) = seconds_to_hours_and_minutes(longest_day.duration());
+    println!(
+        "Your longest grind is {hours} hours, {minutes} minutes. You did it on {}, {:?}",
+        longest_day.date.weekday(),
+        longest_day.date
     );
 
     let table = build_table(results);
