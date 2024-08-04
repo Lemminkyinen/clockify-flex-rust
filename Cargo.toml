@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 chrono = { version = "0.4.38", features = ["serde"] }
-clap = "4.5.11"
+clap = { version = "4.5.11", features = ["derive"] }
 dotenv = "0.15.0"
 futures = "0.3.30"
 itertools = "0.13.0"
