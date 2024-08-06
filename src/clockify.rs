@@ -36,6 +36,12 @@ impl From<&Token> for HeaderValue {
     }
 }
 
+impl From<&str> for Token {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
 fn str_hex_to_u128<'de, D>(deserializer: D) -> Result<u128, D::Error>
 where
     D: Deserializer<'de>,

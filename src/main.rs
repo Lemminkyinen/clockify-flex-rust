@@ -306,7 +306,12 @@ async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
 
     let args = Args::parse();
-    let token = Token::new(&env::var("TOKEN")?);
+
+    let token = if let Some(token) = args.token {
+        token
+    } else {
+        Token::new(&env::var("TOKEN")?)
+    };
 
     let mut spinner = Spinner::new(Spinners::Moon, "Fetching user...".into());
     let time = Instant::now();
