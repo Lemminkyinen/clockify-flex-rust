@@ -229,7 +229,7 @@ impl ClockifyClient {
 
     pub(crate) async fn get_work_items_since(
         &self,
-        date: NaiveDate,
+        date: &NaiveDate,
     ) -> Result<Vec<TimeEntry>, Error> {
         let time_entries_path = format!(
             "workspaces/{}/timeEntries/users/{}/timesheet",
@@ -340,10 +340,10 @@ impl ClockifyClient {
 
         let mut time_off_items = Vec::with_capacity(count);
         for result in time_off_item_results {
-            if let Err(err) = result {
-                return Err(err.into());
+            match result {
+                Ok(result) => time_off_items.push(result),
+                Err(err) => return Err(err.into()),
             }
-            time_off_items.push(result.unwrap())
         }
 
         Ok(time_off_items)

@@ -21,9 +21,11 @@ use tabled::settings::{Color, Style};
 use tabled::Table;
 use tokio::{fs, join};
 
-async fn get_working_days(client: ClockifyClient) -> Result<Vec<WorkDay>, Error> {
-    let since_date = NaiveDate::from_ymd_opt(2023, 1, 1).unwrap();
-    let work_items = client.get_work_items_since(since_date).await?;
+async fn get_working_days(
+    client: ClockifyClient,
+    since: &NaiveDate,
+) -> Result<Vec<WorkDay>, Error> {
+    let work_items = client.get_work_items_since(since).await?;
     let work_days = work_items
         .into_iter()
         .chunk_by(|wi| wi.start.date_naive())
@@ -37,47 +39,50 @@ async fn get_working_days(client: ClockifyClient) -> Result<Vec<WorkDay>, Error>
     Ok(work_days)
 }
 
-async fn get_days_off(client: ClockifyClient) -> Result<Vec<Day>, Error> {
+async fn get_days_off(client: ClockifyClient, since: &NaiveDate) -> Result<Vec<Day>, Error> {
     let items = client.get_time_off_items().await?;
     let days_off = items
         .into_iter()
         .flat_map(|toi| {
+            // TODO support users datetime
             // Use date_naive because:
             // "start": "2024-01-30T22:00:00Z",
             // "end": "2024-01-31T21:59:59.999Z"
             let start = toi.start.date_naive();
             let end = toi.end.date_naive();
-            let duration = (end - start).num_days();
             let mut days_off = Vec::new();
-            for date in utils::DateRange(start + TimeDelta::days(1), end) {
+            for date in utils::DateRange(start + TimeDelta::days(1), end).filter(|d| d >= since) {
                 let note = toi.note.clone();
                 let day_off = if let TimeOffType::SickLeave = toi.type_ {
                     let day = SickLeaveDay::new(note, date);
                     Day::Sick(day)
                 } else {
-                    // Implement HolidayType
+                    // TODO Implement HolidayType
                     let day = Holiday::new(note, date, HolidayType::Unknown);
                     Day::Holiday(day)
                 };
                 days_off.push(day_off);
             }
-            assert!(days_off.len() == duration as usize, "something wrong");
             days_off
         })
         .collect::<Vec<Day>>();
     Ok(days_off)
 }
 
-async fn get_public_holidays() -> Result<Vec<Day>, Error> {
+async fn get_public_holidays(since: &NaiveDate) -> Result<Vec<Day>, Error> {
     // Implement HolidayType
     let content = fs::read("holidays.json").await?;
-    serde_json::from_slice(content.as_ref()).map_err(Error::from)
+    let days = serde_json::from_slice::<Vec<Day>>(content.as_ref()).map_err(Error::from)?;
+    Ok(days.into_iter().filter(|d| &d.date() >= since).collect())
 }
 
-async fn get_items(client: ClockifyClient) -> Result<(Vec<Day>, Vec<WorkDay>, Vec<Day>), Error> {
-    let public_holidays = get_public_holidays();
-    let working_days = get_working_days(client.clone());
-    let days_off = get_days_off(client);
+async fn get_items(
+    client: ClockifyClient,
+    since: NaiveDate,
+) -> Result<(Vec<Day>, Vec<WorkDay>, Vec<Day>), Error> {
+    let public_holidays = get_public_holidays(&since);
+    let working_days = get_working_days(client.clone(), &since);
+    let days_off = get_days_off(client, &since);
     let (public_holidays, working_days, days_off) = join!(public_holidays, working_days, days_off);
     Ok((public_holidays?, working_days?, days_off?))
 }
@@ -133,6 +138,7 @@ fn calculate_results(
     mut working_days: Vec<WorkDay>,
     mut days_off: Vec<Day>,
     include_today: bool,
+    start_balance: i64,
 ) -> Result<Results, Error> {
     let first_working_day = working_days
         .iter()
@@ -197,7 +203,9 @@ fn calculate_results(
     let total_worked_time_sec = working_days.iter().map(|wd| wd.duration()).sum::<i64>();
     let working_day_count = working_days.len();
 
-    let balance = total_worked_time_sec - expected_work_time_sec - flex_time_off_sec;
+    let start_balance = 60i64 * start_balance;
+    let balance =
+        start_balance + total_worked_time_sec - expected_work_time_sec - flex_time_off_sec;
 
     Ok(Results {
         first_working_day,
@@ -213,7 +221,7 @@ fn calculate_results(
     })
 }
 
-fn build_table(r: Results) -> Table {
+fn build_table(r: Results, start_balance: Option<i64>) -> Table {
     fn add_row(builder: &mut Builder, text: &str, days: Option<usize>, seconds: Option<i64>) {
         let hours_and_minutes = if let Some(seconds) = seconds {
             Some(utils::seconds_to_hours_and_minutes(seconds))
@@ -286,6 +294,14 @@ fn build_table(r: Results) -> Table {
         Some(r.working_day_count),
         Some(r.filtered_worked_time()),
     );
+    if let Some(start_balance) = start_balance {
+        add_row(
+            &mut table_builder,
+            "Start balance",
+            None,
+            Some(start_balance * 60),
+        );
+    }
 
     let (balance_hours, balance_minutes) = utils::seconds_to_hours_and_minutes(r.balance);
     table_builder.push_record([
@@ -313,6 +329,12 @@ async fn main() -> Result<(), Error> {
         Token::new(&env::var("TOKEN")?)
     };
 
+    let since_date = args
+        .start_date
+        .unwrap_or(NaiveDate::from_ymd_opt(2023, 1, 1).unwrap());
+
+    let start_balance = args.start_balance.unwrap_or(0);
+
     let mut spinner = Spinner::new(Spinners::Moon, "Fetching user...".into());
     let time = Instant::now();
     let client = ClockifyClient::new(token)?;
@@ -323,7 +345,7 @@ async fn main() -> Result<(), Error> {
 
     let mut spinner = Spinner::new(Spinners::Moon, "Fetching data...".into());
     let time = Instant::now();
-    let (public_holidays, working_days, days_off) = get_items(client).await?;
+    let (public_holidays, working_days, days_off) = get_items(client, since_date).await?;
 
     spinner.stop_with_message(format!(
         "{} items fetched from Clockify API! ({:.2} s)",
@@ -333,17 +355,33 @@ async fn main() -> Result<(), Error> {
 
     let mut spinner = Spinner::new(Spinners::Moon, "Calculating results...".into());
     let time = Instant::now();
-    let results = calculate_results(public_holidays, working_days, days_off, args.include_today)?;
+    let results = calculate_results(
+        public_holidays,
+        working_days,
+        days_off,
+        args.include_today,
+        start_balance,
+    )?;
     spinner.stop_with_message(format!(
         "Items calculated! ({:.2} s)\n",
         time.elapsed().as_secs_f32()
     ));
 
-    println!(
-        "You have been grinding since: {:?}",
-        results.first_working_day
-    );
+    // TODO Support for first day even when the start_date is given
+    let grinding_text = if args.start_date.is_none() {
+        format!(
+            "You have been grinding since: {:?}",
+            results.first_working_day
+        )
+    } else {
+        format!(
+            "You have been grinding at least since: {:?}",
+            results.first_working_day
+        )
+    };
+    println!("{grinding_text}");
 
+    // TODO Support for longest working day even when the start_date is given
     let longest_day = results.longest_working_day.clone();
     let (hours, minutes) = utils::seconds_to_hours_and_minutes(longest_day.duration());
     println!(
@@ -352,7 +390,7 @@ async fn main() -> Result<(), Error> {
         longest_day.date
     );
 
-    let table = build_table(results);
+    let table = build_table(results, args.start_balance);
     println!("{table}");
 
     Ok(())
