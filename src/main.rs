@@ -19,7 +19,7 @@ use tabled::builder::Builder;
 use tabled::settings::themes::ColumnNames;
 use tabled::settings::{Color, Style};
 use tabled::Table;
-use tokio::{fs, join};
+use tokio::join;
 
 async fn get_working_days(
     client: ClockifyClient,
@@ -331,7 +331,7 @@ async fn main() -> Result<(), Error> {
 
     let since_date = args
         .start_date
-        .unwrap_or(NaiveDate::from_ymd_opt(2023, 1, 1).unwrap());
+        .unwrap_or(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap());
 
     let start_balance = args.start_balance.unwrap_or(0);
 

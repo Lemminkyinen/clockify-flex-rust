@@ -1,5 +1,65 @@
 [
     {
+        "date": "2022-01-01",
+        "title": "Uudenvuodenpäivä"
+    },
+    {
+        "date": "2022-01-06",
+        "title": "Loppiainen"
+    },
+    {
+        "date": "2022-04-15",
+        "title": "Pitkäperjantai"
+    },
+    {
+        "date": "2022-04-17",
+        "title": "Pääsiäispäivä"
+    },
+    {
+        "date": "2022-04-18",
+        "title": "2. pääsiäispäivä"
+    },
+    {
+        "date": "2022-05-01",
+        "title": "Vappu"
+    },
+    {
+        "date": "2022-05-26",
+        "title": "Helatorstai"
+    },
+    {
+        "date": "2022-06-05",
+        "title": "Helluntai"
+    },
+    {
+        "date": "2022-06-24",
+        "title": "Juhannusaatto"
+    },
+    {
+        "date": "2022-06-25",
+        "title": "Juhannuspäivä"
+    },
+    {
+        "date": "2022-11-05",
+        "title": "Pyhäinpäivä"
+    },
+    {
+        "date": "2022-12-06",
+        "title": "Itsenäisyyspäivä"
+    },
+    {
+        "date": "2022-12-24",
+        "title": "Jouluaatto"
+    },
+    {
+        "date": "2022-12-25",
+        "title": "Joulupäivä"
+    },
+    {
+        "date": "2022-12-26",
+        "title": "Tapaninpäivä"
+    },    
+    {
         "date": "2023-01-01",
         "title": "Uudenvuodenpäivä"
     },

@@ -14,7 +14,7 @@ pub(crate) struct Args {
     #[arg(short, long)]
     pub token: Option<Token>,
 
-    /// Start date equal or greater than 2023-01-01 in the format YYYY-MM-DD.
+    /// Start date equal or greater than 2022-01-01 in the format YYYY-MM-DD.
     #[arg(short, long, value_parser = validate_date)]
     pub start_date: Option<NaiveDate>,
 
@@ -25,11 +25,11 @@ pub(crate) struct Args {
 
 fn validate_date(s: &str) -> Result<NaiveDate, Error> {
     let date = NaiveDate::parse_from_str(s, "%Y-%m-%d")?;
-    if date >= NaiveDate::from_ymd_opt(2023, 1, 1).unwrap() {
+    if date >= NaiveDate::from_ymd_opt(2022, 1, 1).unwrap() {
         Ok(date)
     } else {
         Err(Error::msg(
-            "Input date has to be equal or greater than 2023-01-01!",
+            "Input date has to be equal or greater than 2022-01-01!",
         ))
     }
 }
