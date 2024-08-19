@@ -71,8 +71,8 @@ async fn get_days_off(client: ClockifyClient, since: &NaiveDate) -> Result<Vec<D
 
 async fn get_public_holidays(since: &NaiveDate) -> Result<Vec<Day>, Error> {
     // Implement HolidayType
-    let content = fs::read("holidays.json").await?;
-    let days = serde_json::from_slice::<Vec<Day>>(content.as_ref()).map_err(Error::from)?;
+    let json_bytes = include_bytes!("../holidays.json");
+    let days = serde_json::from_slice::<Vec<Day>>(json_bytes).map_err(Error::from)?;
     Ok(days.into_iter().filter(|d| &d.date() >= since).collect())
 }
 
