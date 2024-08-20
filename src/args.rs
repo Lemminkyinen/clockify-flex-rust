@@ -1,6 +1,6 @@
 use anyhow::Error;
-use chrono::NaiveDate;
-use clap::{Args as ClapArgs, Parser};
+use chrono::{NaiveDate, Utc};
+use clap::Parser;
 
 use crate::clockify::Token;
 
@@ -25,11 +25,27 @@ pub(crate) struct Args {
 
 fn validate_date(s: &str) -> Result<NaiveDate, Error> {
     let date = NaiveDate::parse_from_str(s, "%Y-%m-%d")?;
-    if date >= NaiveDate::from_ymd_opt(2022, 1, 1).unwrap() {
-        Ok(date)
+    let date2022 = NaiveDate::from_ymd_opt(2022, 1, 1).unwrap();
+    let today = Utc::now().date_naive();
+
+    let err_msg = if date > today {
+        "Input cannot be greater than today!"
+    } else if date < date2022 {
+        "Input has to be equal or greater than 2022-01-01!"
     } else {
-        Err(Error::msg(
-            "Input date has to be equal or greater than 2022-01-01!",
-        ))
+        return Ok(date);
+    };
+
+    Err(Error::msg(err_msg))
+}
+
+impl Args {
+    pub(crate) fn validate(&self) -> Result<(), clap::Error> {
+        let today = Utc::now().date_naive();
+        if self.start_date == Some(today) && !self.include_today {
+            println!("If start_date is today, --include-today option must be used.");
+            std::process::exit(1);
+        }
+        Ok(())
     }
 }

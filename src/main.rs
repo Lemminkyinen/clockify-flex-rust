@@ -10,7 +10,6 @@ use args::Args;
 use chrono::{Datelike, NaiveDate, TimeDelta};
 use clap::Parser;
 use itertools::Itertools;
-
 use models::{Holiday, HolidayType, SickLeaveDay, WorkDay};
 use spinners::{Spinner, Spinners};
 use std::env;
@@ -322,6 +321,7 @@ async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
 
     let args = Args::parse();
+    args.validate()?;
 
     let token = if let Some(token) = args.token {
         token
