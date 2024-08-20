@@ -58,7 +58,11 @@
     {
         "date": "2022-12-26",
         "title": "Tapaninpäivä"
-    },    
+    },
+    {
+        "date": "2022-12-31",
+        "title": "Uudenvuodenaatto"
+    },
     {
         "date": "2023-01-01",
         "title": "Uudenvuodenpäivä"
@@ -118,6 +122,10 @@
     {
         "date": "2023-12-26",
         "title": "Tapaninpäivä"
+    },
+    {
+        "date": "2023-12-31",
+        "title": "Uudenvuodenaatto"
     },
     {
         "date": "2024-01-01",
@@ -180,6 +188,10 @@
         "title": "Tapaninpäivä"
     },
     {
+        "date": "2024-12-31",
+        "title": "Uudenvuodenaatto"
+    },
+    {
         "date": "2025-01-01",
         "title": "Uudenvuodenpäivä"
     },
@@ -238,6 +250,10 @@
     {
         "date": "2025-12-26",
         "title": "Tapaninpäivä"
+    },
+    {
+        "date": "2025-12-31",
+        "title": "Uudenvuodenaatto"
     },
     {
         "date": "2026-01-01",
@@ -300,6 +316,10 @@
         "title": "Tapaninpäivä"
     },
     {
+        "date": "2026-12-31",
+        "title": "Uudenvuodenaatto"
+    },
+    {
         "date": "2027-01-01",
         "title": "Uudenvuodenpäivä"
     },
@@ -360,6 +380,10 @@
         "title": "Tapaninpäivä"
     },
     {
+        "date": "2027-12-31",
+        "title": "Uudenvuodenaatto"
+    },
+    {
         "date": "2028-01-01",
         "title": "Uudenvuodenpäivä"
     },
@@ -418,5 +442,9 @@
     {
         "date": "2028-12-26",
         "title": "Tapaninpäivä"
+    },
+    {
+        "date": "2028-12-31",
+        "title": "Uudenvuodenaatto"
     }
 ]
