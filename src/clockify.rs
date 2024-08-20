@@ -144,6 +144,8 @@ impl<'de> Deserialize<'de> for TimeEntry {
 pub(crate) enum TimeOffType {
     DayOff,
     SickLeave,
+    Vacation,
+    ParentalLeave,
 }
 
 #[derive(Clone, Debug)]
@@ -153,6 +155,7 @@ pub(crate) struct TimeOffItem {
     pub type_: TimeOffType,
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
+    pub status: String,
 }
 
 impl<'de> Deserialize<'de> for TimeOffItem {
@@ -161,15 +164,23 @@ impl<'de> Deserialize<'de> for TimeOffItem {
 
         // Assert that time unit is days
         let time_unit = get_string_field(&v, "timeUnit")?;
-        assert!(&time_unit == "DAYS", "Time unit wasn't 'DAYS'!");
+        assert!(&time_unit == "DAYS", "Time unit wasn't 'DAYS'! {time_unit}");
 
         let user_id = get_string_field(&v, "userId")?;
         let policy_name = get_string_field(&v, "policyName")?;
         let type_ = match policy_name.as_str() {
             "Day off" => TimeOffType::DayOff,
             "Sick leave" => TimeOffType::SickLeave,
+            "Vacation" => TimeOffType::Vacation,
+            "Parental leave" => TimeOffType::ParentalLeave,
             x => return Err(serde::de::Error::custom(format!("unknown policyName: {x}"))),
         };
+
+        let status_object = v
+            .get("status")
+            .ok_or_else(|| serde::de::Error::missing_field("status"))?;
+        let status = get_string_field(status_object, "statusType")?;
+
         let note = get_string_field::<D::Error>(&v, "note").unwrap_or_default();
 
         let time_off_object = v
@@ -195,6 +206,7 @@ impl<'de> Deserialize<'de> for TimeOffItem {
             user_id,
             start,
             end,
+            status,
         })
     }
 }

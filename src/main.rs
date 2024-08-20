@@ -52,13 +52,23 @@ async fn get_days_off(client: ClockifyClient, since: &NaiveDate) -> Result<Vec<D
             let mut days_off = Vec::new();
             for date in utils::DateRange(start + TimeDelta::days(1), end).filter(|d| d >= since) {
                 let note = toi.note.clone();
-                let day_off = if let TimeOffType::SickLeave = toi.type_ {
-                    let day = SickLeaveDay::new(note, date);
-                    Day::Sick(day)
-                } else {
-                    // TODO Implement HolidayType
-                    let day = Holiday::new(note, date, HolidayType::Unknown);
-                    Day::Holiday(day)
+                let day_off = match toi.type_ {
+                    TimeOffType::SickLeave => {
+                        let day = SickLeaveDay::new(note, date);
+                        Day::Sick(day)
+                    }
+                    TimeOffType::Vacation => {
+                        let day = Holiday::new(String::new(), date, HolidayType::Vacation);
+                        Day::Holiday(day)
+                    }
+                    TimeOffType::ParentalLeave => {
+                        let day = Holiday::new(String::new(), date, HolidayType::ParentalLeave);
+                        Day::Holiday(day)
+                    }
+                    TimeOffType::DayOff => {
+                        let day = Holiday::new(String::new(), date, HolidayType::Flex);
+                        Day::Holiday(day)
+                    }
                 };
                 days_off.push(day_off);
             }
@@ -90,6 +100,8 @@ struct Results {
     first_working_day: NaiveDate,
     working_day_count: usize,
     worked_time: i64,
+    parental_leave_day_count: usize,
+    vacation_day_count: usize,
     filtered_expected_working_day_count: usize,
     public_holiday_count: usize,
     sick_leave_day_count: usize,
@@ -175,7 +187,7 @@ fn calculate_results(
         .collect_vec();
     let public_holiday_count = public_holidays.len();
 
-    let (sick_leave_days, flex_time_off_days): (Vec<Day>, Vec<Day>) = days_off
+    let (sick_leave_days, time_off_days): (Vec<Day>, Vec<Day>) = days_off
         .into_iter()
         .partition(|day| matches!(day, Day::Sick(_)));
     let sick_leave_days = sick_leave_days
@@ -183,8 +195,28 @@ fn calculate_results(
         .map(Day::into_date)
         .collect_vec();
     let sick_leave_day_count = sick_leave_days.len();
+
+    let (parental_leave_days, time_off_days): (Vec<Day>, Vec<Day>) =
+        time_off_days.into_iter().partition(|day| match day {
+            Day::Holiday(hd) => matches!(hd.type_, HolidayType::ParentalLeave),
+            _ => false,
+        });
+    let parental_leave_days = parental_leave_days
+        .into_iter()
+        .map(Day::into_date)
+        .collect_vec();
+    let parental_leave_day_count = parental_leave_days.len();
+
+    let (vacation_days, time_off_days): (Vec<Day>, Vec<Day>) =
+        time_off_days.into_iter().partition(|day| match day {
+            Day::Holiday(hd) => matches!(hd.type_, HolidayType::Vacation),
+            _ => false,
+        });
+    let vacation_days = vacation_days.into_iter().map(Day::into_date).collect_vec();
+    let vacation_day_count = vacation_days.len();
+
     let (held_flex_time_off_days, future_flex_time_off_days): (Vec<NaiveDate>, Vec<NaiveDate>) =
-        flex_time_off_days
+        time_off_days
             .into_iter()
             .map(Day::into_date)
             .partition(utils::not_in_future);
@@ -193,12 +225,19 @@ fn calculate_results(
 
     let filtered_expected_working_days = all_weekdays
         .into_iter()
-        .filter(|day| !public_holidays.contains(day) && !sick_leave_days.contains(day))
+        .filter(|day| {
+            !public_holidays.contains(day)
+                && !sick_leave_days.contains(day)
+                && !vacation_days.contains(day)
+                && !parental_leave_days.contains(day)
+        })
         .collect_vec();
     let filtered_expected_working_day_count = filtered_expected_working_days.len();
 
     let expected_work_time_sec = utils::workdays_to_sec(filtered_expected_working_day_count);
     let flex_time_off_sec = utils::workdays_to_sec(held_flex_time_off_day_count);
+    let vacation_time_sec = utils::workdays_to_sec(vacation_day_count);
+    let parental_leave_time_sec = utils::workdays_to_sec(parental_leave_day_count);
     let total_worked_time_sec = working_days.iter().map(|wd| wd.duration()).sum::<i64>();
     let working_day_count = working_days.len();
 
@@ -210,6 +249,8 @@ fn calculate_results(
         first_working_day,
         working_day_count,
         public_holiday_count,
+        parental_leave_day_count,
+        vacation_day_count,
         filtered_expected_working_day_count,
         sick_leave_day_count,
         held_flex_time_off_day_count,
@@ -255,6 +296,18 @@ fn build_table(r: Results, start_balance: Option<i64>) -> Table {
         &mut table_builder,
         "Public holidays (on weekdays)",
         Some(r.public_holiday_count),
+        None,
+    );
+    add_row(
+        &mut table_builder,
+        "Held parental leave days",
+        Some(r.parental_leave_day_count),
+        None,
+    );
+    add_row(
+        &mut table_builder,
+        "Held vacation days",
+        Some(r.vacation_day_count),
         None,
     );
     add_row(

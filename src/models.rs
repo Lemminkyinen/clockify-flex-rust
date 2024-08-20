@@ -7,14 +7,15 @@ pub(crate) enum HolidayType {
     Vacation,
     PublicHoliday,
     Flex,
+    ParentalLeave,
     Unknown,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct Holiday {
-    type_: HolidayType,
-    title: String,
-    date: NaiveDate,
+    pub type_: HolidayType,
+    pub title: String,
+    pub date: NaiveDate,
 }
 
 impl Holiday {
