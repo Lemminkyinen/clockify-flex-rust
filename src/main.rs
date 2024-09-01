@@ -19,6 +19,7 @@ use tabled::settings::themes::ColumnNames;
 use tabled::settings::{Color, Style};
 use tabled::Table;
 use tokio::join;
+use utils::{get_cache_first_date, set_cache_first_date};
 
 async fn get_working_days(
     client: ClockifyClient,
@@ -93,7 +94,12 @@ async fn get_items(
     let working_days = get_working_days(client.clone(), &since);
     let days_off = get_days_off(client, &since);
     let (public_holidays, working_days, days_off) = join!(public_holidays, working_days, days_off);
-    Ok((public_holidays?, working_days?, days_off?))
+    Ok((
+        public_holidays
+            .map_err(|e| Error::msg(format!("Failed to get public holidays: {:?}", e)))?,
+        working_days.map_err(|e| Error::msg(format!("Failed to get working days: {:?}", e)))?,
+        days_off.map_err(|e| Error::msg(format!("Failed to get fays off: {:?}", e)))?,
+    ))
 }
 
 struct Results {
@@ -382,15 +388,16 @@ async fn main() -> Result<(), Error> {
         Token::new(&env::var("TOKEN")?)
     };
 
+    let cache_date = get_cache_first_date(&token)?;
     let since_date = args
         .start_date
-        .unwrap_or(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap());
+        .unwrap_or(cache_date.unwrap_or(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap()));
 
     let start_balance = args.start_balance.unwrap_or(0);
 
     let mut spinner = Spinner::new(Spinners::Moon, "Fetching user...".into());
     let time = Instant::now();
-    let client = ClockifyClient::new(token)?;
+    let client = ClockifyClient::new(&token)?;
     spinner.stop_with_message(format!(
         "User fetched from Clockify API! ({:.2} s)",
         time.elapsed().as_secs_f32()
@@ -419,6 +426,11 @@ async fn main() -> Result<(), Error> {
         "Items calculated! ({:.2} s)\n",
         time.elapsed().as_secs_f32()
     ));
+
+    // Save first day cache, if start_date was not given
+    if args.start_date.is_none() {
+        set_cache_first_date(&token, &results.first_working_day)?;
+    }
 
     // TODO Support for first day even when the start_date is given
     let grinding_text = if args.start_date.is_none() {

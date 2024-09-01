@@ -1,12 +1,13 @@
 use anyhow::Error;
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeDelta, TimeZone, Utc};
 use futures::future::join_all;
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use std::fmt;
+use std::{fmt, thread, time};
 use url::Url;
 
 lazy_static! {
@@ -14,7 +15,7 @@ lazy_static! {
         Url::parse("https://global.api.clockify.me/").expect("Cannot parse clockify url!");
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, PartialOrd, Hash)]
 pub(crate) struct Token(String);
 
 impl Token {
@@ -219,7 +220,7 @@ pub(crate) struct ClockifyClient {
 }
 
 impl ClockifyClient {
-    pub(crate) fn new(token: Token) -> Result<Self, Error> {
+    pub(crate) fn new(token: &Token) -> Result<Self, Error> {
         let token_ = &token.clone();
 
         let mut headers = HeaderMap::new();
@@ -275,31 +276,69 @@ impl ClockifyClient {
             current_start = current_end;
         }
 
-        let request_futures = queries.into_iter().map(|(start, end)| {
-            self.client
-                .get(url.clone())
-                .query(&[
-                    (
-                        "start",
-                        start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-                    ),
-                    (
-                        "end",
-                        end.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-                    ),
-                    ("in-progress", false.to_string()),
-                    ("page", 0.to_string()),
-                    ("page-size", 0.to_string()),
-                ])
-                .send()
-        });
+        let mut request_futures = queries
+            .into_iter()
+            .map(|(start, end)| {
+                self.client
+                    .get(url.clone())
+                    .query(&[
+                        (
+                            "start",
+                            start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                        ),
+                        (
+                            "end",
+                            end.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                        ),
+                        ("in-progress", false.to_string()),
+                        ("page", 0.to_string()),
+                        ("page-size", 0.to_string()),
+                    ])
+                    .send()
+            })
+            .collect_vec();
 
         let mut responses = Vec::with_capacity(request_futures.len());
-        for result in join_all(request_futures).await {
-            if let Err(e) = result {
-                return Err(e.into());
-            };
-            responses.push(result.unwrap())
+        let request_chunks = request_futures.chunks_mut(18);
+
+        '_chunk: for chunk in request_chunks {
+            'result: for result in join_all(chunk).await {
+                match result {
+                    Err(e) => return Err(e.into()),
+                    Ok(res) => {
+                        if !res.status().is_success() {
+                            println!("Unsuccessful response!");
+                            continue 'result;
+                        }
+
+                        let headers = res.headers();
+                        let cont_len = headers
+                            .get("content-length")
+                            .map(|v| v.to_str().map_err(Error::msg));
+                        let transfer_encoding = headers
+                            .get("transfer-encoding")
+                            .map(|v| v.to_str().map_err(Error::msg));
+
+                        // println!("status code: {:?}", res.status().as_u16());
+                        // println!("headers: {:?}", res.headers());
+                        if let Some(Ok(encoding)) = transfer_encoding {
+                            if encoding == "chunked" {
+                                responses.push(res);
+                                continue 'result;
+                            }
+                        }
+                        if let Some(Ok(cont_len)) = cont_len {
+                            // println!("cont_len {:?}", cont_len);
+                            if !["0", "2"].contains(&cont_len) {
+                                responses.push(res);
+                            }
+                        }
+                    }
+                };
+            }
+            if responses.capacity() > 18 {
+                thread::sleep(time::Duration::from_millis(1000));
+            }
         }
 
         let json_futures = responses
@@ -334,7 +373,17 @@ impl ClockifyClient {
             "userGroups": {}
         });
 
-        let response = self.client.post(url).json(body).send().await?;
+        let mut response = self.client.post(url.clone()).json(body).send().await?;
+        if response.status().as_u16() == 429 {
+            'cooldown: for x in [600, 750, 1250, 2000] {
+                // Clockify is rate limiting.. Cooling down a bit and trying again... ({} ms)
+                std::thread::sleep(std::time::Duration::from_millis(x));
+                response = self.client.post(url.clone()).json(body).send().await?;
+                if response.status().is_success() {
+                    break 'cooldown;
+                }
+            }
+        }
         let response_json = response.json::<Value>().await?;
         let count = response_json
             .get("count")
