@@ -107,7 +107,8 @@ struct Results {
     working_day_count: usize,
     worked_time: i64,
     parental_leave_day_count: usize,
-    vacation_day_count: usize,
+    held_vacation_day_count: usize,
+    future_vacation_day_count: usize,
     filtered_expected_working_day_count: usize,
     public_holiday_count: usize,
     sick_leave_day_count: usize,
@@ -219,7 +220,12 @@ fn calculate_results(
             _ => false,
         });
     let vacation_days = vacation_days.into_iter().map(Day::into_date).collect_vec();
-    let vacation_day_count = vacation_days.len();
+    let (held_vacation_days, future_vacation_days): (Vec<NaiveDate>, Vec<NaiveDate>) =
+        vacation_days
+            .into_iter()
+            .partition(|day| day < &utils::today() || (include_today && day == &utils::today()));
+    let held_vacation_day_count = held_vacation_days.len();
+    let future_vacation_day_count = future_vacation_days.len();
 
     let (held_flex_time_off_days, future_flex_time_off_days): (Vec<NaiveDate>, Vec<NaiveDate>) =
         time_off_days
@@ -234,7 +240,7 @@ fn calculate_results(
         .filter(|day| {
             !public_holidays.contains(day)
                 && !sick_leave_days.contains(day)
-                && !vacation_days.contains(day)
+                && !held_vacation_days.contains(day)
                 && !parental_leave_days.contains(day)
         })
         .collect_vec();
@@ -242,8 +248,6 @@ fn calculate_results(
 
     let expected_work_time_sec = utils::workdays_to_sec(filtered_expected_working_day_count);
     let flex_time_off_sec = utils::workdays_to_sec(held_flex_time_off_day_count);
-    let vacation_time_sec = utils::workdays_to_sec(vacation_day_count);
-    let parental_leave_time_sec = utils::workdays_to_sec(parental_leave_day_count);
     let total_worked_time_sec = working_days.iter().map(|wd| wd.duration()).sum::<i64>();
     let working_day_count = working_days.len();
 
@@ -256,7 +260,8 @@ fn calculate_results(
         working_day_count,
         public_holiday_count,
         parental_leave_day_count,
-        vacation_day_count,
+        held_vacation_day_count,
+        future_vacation_day_count,
         filtered_expected_working_day_count,
         sick_leave_day_count,
         held_flex_time_off_day_count,
@@ -313,7 +318,13 @@ fn build_table(r: Results, start_balance: Option<i64>) -> Table {
     add_row(
         &mut table_builder,
         "Held vacation days",
-        Some(r.vacation_day_count),
+        Some(r.held_vacation_day_count),
+        None,
+    );
+    add_row(
+        &mut table_builder,
+        "Future vacation days",
+        Some(r.future_vacation_day_count),
         None,
     );
     add_row(
