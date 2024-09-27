@@ -318,6 +318,7 @@ impl ClockifyClient {
     }
 
     pub(crate) async fn get_time_off_items(&self) -> Result<Vec<TimeOffItem>, Error> {
+        log::info!("Entered get_time_off_items");
         let time_entries_path =
             format!("workspaces/{}/time-off/requests", self.user.workspace_str());
         let url = self.base_url.join(&time_entries_path)?;
@@ -335,7 +336,9 @@ impl ClockifyClient {
         });
 
         let response = self.client.post(url).json(body).send().await?;
+        log::info!("First response received");
         let response_json = response.json::<Value>().await?;
+        log::info!("JSON response received");
         let count = response_json
             .get("count")
             .ok_or_else(|| Error::msg("missing count"))?

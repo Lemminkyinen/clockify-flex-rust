@@ -1,6 +1,6 @@
 use anyhow::Error;
 use chrono::{NaiveDate, Utc};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 use crate::clockify::Token;
 
@@ -21,6 +21,32 @@ pub(crate) struct Args {
     /// Optional start balance in minutes
     #[arg(short = 'b', long, requires = "start_date")]
     pub start_balance: Option<i64>,
+
+    #[arg(long, default_value = "None")]
+    pub log_level: LogLevel,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub(crate) enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+    None,
+}
+
+impl Into<log::LevelFilter> for LogLevel {
+    fn into(self) -> log::LevelFilter {
+        match self {
+            Self::None => log::LevelFilter::Off,
+            Self::Error => log::LevelFilter::Error,
+            Self::Warn => log::LevelFilter::Warn,
+            Self::Info => log::LevelFilter::Info,
+            Self::Debug => log::LevelFilter::Debug,
+            Self::Trace => log::LevelFilter::Trace,
+        }
+    }
 }
 
 fn validate_date(s: &str) -> Result<NaiveDate, Error> {

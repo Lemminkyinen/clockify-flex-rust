@@ -24,6 +24,7 @@ async fn get_working_days(
     client: ClockifyClient,
     since: &NaiveDate,
 ) -> Result<Vec<WorkDay>, Error> {
+    log::info!("Entered get_working_days function");
     let work_items = client.get_work_items_since(since).await?;
     let work_days = work_items
         .into_iter()
@@ -39,6 +40,7 @@ async fn get_working_days(
 }
 
 async fn get_days_off(client: ClockifyClient, since: &NaiveDate) -> Result<Vec<Day>, Error> {
+    log::info!("Entered get_days_off function");
     let items = client.get_time_off_items().await?;
     let days_off = items
         .into_iter()
@@ -375,6 +377,10 @@ async fn main() -> Result<(), Error> {
 
     let args = Args::parse();
     args.validate()?;
+
+    env_logger::builder()
+        .filter_level(args.log_level.into())
+        .init();
 
     let token = if let Some(token) = args.token {
         token
