@@ -3,3 +3,5 @@
 debug_output.json
 /.vscode
 .clockify-rust
+/*test*.json
+.settings.json

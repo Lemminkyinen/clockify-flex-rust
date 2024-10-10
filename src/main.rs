@@ -1,90 +1,27 @@
 mod args;
 mod clockify;
+mod extra_settings;
 mod models;
 mod utils;
 
-use crate::clockify::{ClockifyClient, TimeOffType, Token};
-use crate::models::{Day, WorkItem};
 use anyhow::Error;
 use args::Args;
-use chrono::{Datelike, NaiveDate, TimeDelta};
+use chrono::{Datelike, NaiveDate};
 use clap::Parser;
+use clockify::{get_days_off, get_working_days};
+use clockify::{ClockifyClient, Token};
+use extra_settings::schema::ExtraSettings;
+use extra_settings::GlobalSettings;
 use itertools::Itertools;
-use models::{Holiday, HolidayType, SickLeaveDay, WorkDay};
+use models::Day;
+use models::{HolidayType, WorkDay};
 use spinners::{Spinner, Spinners};
 use std::env;
 use std::time::Instant;
-use tabled::builder::Builder;
-use tabled::settings::themes::ColumnNames;
-use tabled::settings::{Color, Style};
-use tabled::Table;
 use tokio::join;
-use utils::{get_cache_first_date, set_cache_first_date};
-
-async fn get_working_days(
-    client: ClockifyClient,
-    since: &NaiveDate,
-) -> Result<Vec<WorkDay>, Error> {
-    let work_items = client.get_work_items_since(since).await?;
-    let work_days = work_items
-        .into_iter()
-        .chunk_by(|wi| wi.start.date_naive())
-        .into_iter()
-        .map(|(date, group)| {
-            let work_items = group.map(WorkItem::from).collect();
-            WorkDay::new(date, work_items)
-        })
-        .collect::<Vec<WorkDay>>();
-
-    Ok(work_days)
-}
-
-async fn get_days_off(client: ClockifyClient, since: &NaiveDate) -> Result<Vec<Day>, Error> {
-    let items = client.get_time_off_items().await?;
-    let days_off = items
-        .into_iter()
-        .flat_map(|toi| {
-            // TODO support users datetime
-            // Use date_naive because:
-            // "start": "2024-01-30T22:00:00Z",
-            // "end": "2024-01-31T21:59:59.999Z"
-            let start = toi.start.date_naive();
-            let end = toi.end.date_naive();
-            let mut days_off = Vec::new();
-            for date in utils::DateRange(start + TimeDelta::days(1), end).filter(|d| d >= since) {
-                let note = toi.note.clone();
-                let day_off = match toi.type_ {
-                    TimeOffType::SickLeave => {
-                        let day = SickLeaveDay::new(note, date);
-                        Day::Sick(day)
-                    }
-                    TimeOffType::Vacation => {
-                        let day = Holiday::new(String::new(), date, HolidayType::Vacation);
-                        Day::Holiday(day)
-                    }
-                    TimeOffType::ParentalLeave => {
-                        let day = Holiday::new(String::new(), date, HolidayType::ParentalLeave);
-                        Day::Holiday(day)
-                    }
-                    TimeOffType::DayOff => {
-                        let day = Holiday::new(String::new(), date, HolidayType::Flex);
-                        Day::Holiday(day)
-                    }
-                };
-                days_off.push(day_off);
-            }
-            days_off
-        })
-        .collect::<Vec<Day>>();
-    Ok(days_off)
-}
-
-async fn get_public_holidays(since: &NaiveDate) -> Result<Vec<Day>, Error> {
-    // Implement HolidayType
-    let json_bytes = include_bytes!("../holidays.json");
-    let days = serde_json::from_slice::<Vec<Day>>(json_bytes).map_err(Error::from)?;
-    Ok(days.into_iter().filter(|d| &d.date() >= since).collect())
-}
+use utils::cache::{get_cache_first_date, set_cache_first_date};
+use utils::get_public_holidays;
+use utils::table::build_table;
 
 async fn get_items(
     client: ClockifyClient,
@@ -115,6 +52,7 @@ struct Results {
     held_flex_time_off_day_count: usize,
     future_flex_time_off_day_count: usize,
     longest_working_day: WorkDay,
+    expected_working_time_sec: i64,
     balance: i64,
 }
 
@@ -142,7 +80,7 @@ impl Results {
     }
 
     fn filtered_worked_time(&self) -> i64 {
-        self.worked_time - utils::workdays_to_sec(self.held_flex_time_off_day_count)
+        self.worked_time - utils::days_to_secs(self.held_flex_time_off_day_count)
     }
 
     fn balance_days(&self) -> i64 {
@@ -157,6 +95,7 @@ fn calculate_results(
     mut days_off: Vec<Day>,
     include_today: bool,
     start_balance: i64,
+    user_settings: Option<ExtraSettings>,
 ) -> Result<Results, Error> {
     let first_working_day = working_days
         .iter()
@@ -181,16 +120,23 @@ fn calculate_results(
         .ok_or(Error::msg("Days iterator is empty!"))?
         .to_owned();
 
-    let public_holidays = public_holidays
+    let public_holidays = public_holidays.into_iter().filter(|day| {
+        let date = day.date();
+        utils::not_in_future(&date) && utils::is_weekday(&date) && first_working_day < date
+    });
+
+    // Filter out ignore items
+    let public_holidays_filtered = if let Some(settings) = &user_settings {
+        public_holidays
+            .filter(|day| !settings.is_ignored(day))
+            .collect_vec()
+    } else {
+        public_holidays.collect_vec()
+    };
+
+    let public_holidays = public_holidays_filtered
         .into_iter()
-        .filter_map(|day| {
-            let date = day.date();
-            if utils::not_in_future(&date) && utils::is_weekday(&date) && first_working_day < date {
-                Some(date)
-            } else {
-                None
-            }
-        })
+        .map(|d| d.date())
         .collect_vec();
     let public_holiday_count = public_holidays.len();
 
@@ -210,7 +156,15 @@ fn calculate_results(
         });
     let parental_leave_days = parental_leave_days
         .into_iter()
-        .map(Day::into_date)
+        .filter_map(|d| {
+            if let Some(settings) = &user_settings {
+                // Ignore weekends and settings.is_ignored
+                if !utils::is_weekday(&d.date()) || settings.is_ignored(&d) {
+                    return None;
+                }
+            }
+            Some(Day::into_date(d))
+        })
         .collect_vec();
     let parental_leave_day_count = parental_leave_days.len();
 
@@ -219,7 +173,17 @@ fn calculate_results(
             Day::Holiday(hd) => matches!(hd.type_, HolidayType::Vacation),
             _ => false,
         });
-    let vacation_days = vacation_days.into_iter().map(Day::into_date).collect_vec();
+    let vacation_days = vacation_days
+        .into_iter()
+        .filter_map(|d| {
+            if let Some(settings) = &user_settings {
+                if !utils::is_weekday(&d.date()) || settings.is_ignored(&d) {
+                    return None;
+                }
+            }
+            Some(Day::into_date(d))
+        })
+        .collect_vec();
     let (held_vacation_days, future_vacation_days): (Vec<NaiveDate>, Vec<NaiveDate>) =
         vacation_days
             .into_iter()
@@ -230,7 +194,14 @@ fn calculate_results(
     let (held_flex_time_off_days, future_flex_time_off_days): (Vec<NaiveDate>, Vec<NaiveDate>) =
         time_off_days
             .into_iter()
-            .map(Day::into_date)
+            .filter_map(|d| {
+                if let Some(settings) = &user_settings {
+                    if !utils::is_weekday(&d.date()) || settings.is_ignored(&d) {
+                        return None;
+                    }
+                }
+                Some(Day::into_date(d))
+            })
             .partition(utils::not_in_future);
     let held_flex_time_off_day_count = held_flex_time_off_days.len();
     let future_flex_time_off_day_count = future_flex_time_off_days.len();
@@ -244,16 +215,17 @@ fn calculate_results(
                 && !parental_leave_days.contains(day)
         })
         .collect_vec();
-    let filtered_expected_working_day_count = filtered_expected_working_days.len();
 
-    let expected_work_time_sec = utils::workdays_to_sec(filtered_expected_working_day_count);
-    let flex_time_off_sec = utils::workdays_to_sec(held_flex_time_off_day_count);
+    let filtered_expected_working_day_count = filtered_expected_working_days.len();
+    let expected_working_time_sec =
+        utils::workdays_to_secs(filtered_expected_working_days, &user_settings);
+    let flex_time_off_sec = utils::days_to_secs(held_flex_time_off_day_count);
     let total_worked_time_sec = working_days.iter().map(|wd| wd.duration()).sum::<i64>();
     let working_day_count = working_days.len();
 
     let start_balance = 60i64 * start_balance;
     let balance =
-        start_balance + total_worked_time_sec - expected_work_time_sec - flex_time_off_sec;
+        start_balance + total_worked_time_sec - expected_working_time_sec - flex_time_off_sec;
 
     Ok(Results {
         first_working_day,
@@ -265,125 +237,12 @@ fn calculate_results(
         filtered_expected_working_day_count,
         sick_leave_day_count,
         held_flex_time_off_day_count,
+        expected_working_time_sec,
         future_flex_time_off_day_count,
         longest_working_day,
         worked_time: total_worked_time_sec,
         balance,
     })
-}
-
-fn build_table(r: Results, start_balance: Option<i64>) -> Table {
-    fn add_row(builder: &mut Builder, text: &str, days: Option<usize>, seconds: Option<i64>) {
-        let hours_and_minutes = if let Some(seconds) = seconds {
-            Some(utils::seconds_to_hours_and_minutes(seconds))
-        } else {
-            days.map(|days| utils::hours_to_hours_and_minutes(days as f32 * *utils::WORK_DAY_HOURS))
-        };
-
-        let hours_and_minutes_str = if let Some((hours, minutes)) = hours_and_minutes {
-            let minutes = if minutes != 0 {
-                format!(", {} minutes", minutes)
-            } else {
-                "".into()
-            };
-            &format!("{} hours{}", hours, minutes)
-        } else {
-            ""
-        };
-
-        let days_str = if let Some(days) = days {
-            &days.to_string()
-        } else {
-            ""
-        };
-
-        builder.push_record([text, days_str, hours_and_minutes_str])
-    }
-
-    let mut table_builder = Builder::default();
-
-    table_builder.push_record(["Item", "Days", "Hours & minutes"]);
-    add_row(
-        &mut table_builder,
-        "Public holidays (on weekdays)",
-        Some(r.public_holiday_count),
-        None,
-    );
-    add_row(
-        &mut table_builder,
-        "Held parental leave days",
-        Some(r.parental_leave_day_count),
-        None,
-    );
-    add_row(
-        &mut table_builder,
-        "Held vacation days",
-        Some(r.held_vacation_day_count),
-        None,
-    );
-    add_row(
-        &mut table_builder,
-        "Future vacation days",
-        Some(r.future_vacation_day_count),
-        None,
-    );
-    add_row(
-        &mut table_builder,
-        "Held flex time off",
-        Some(r.held_flex_time_off_day_count),
-        None,
-    );
-    add_row(
-        &mut table_builder,
-        "Future flex time off",
-        Some(r.future_flex_time_off_day_count),
-        None,
-    );
-    add_row(
-        &mut table_builder,
-        "Sick leave time",
-        Some(r.sick_leave_day_count),
-        None,
-    );
-    add_row(
-        &mut table_builder,
-        "Expected working time (sick leaves & public holidays deducted)",
-        Some(r.filtered_expected_working_day_count),
-        None,
-    );
-    add_row(
-        &mut table_builder,
-        "Total working time",
-        Some(r.working_day_count),
-        Some(r.worked_time),
-    );
-    add_row(
-        &mut table_builder,
-        "Total working time (held flex hours deducted)",
-        Some(r.working_day_count),
-        Some(r.filtered_worked_time()),
-    );
-    if let Some(start_balance) = start_balance {
-        add_row(
-            &mut table_builder,
-            "Start balance",
-            None,
-            Some(start_balance * 60),
-        );
-    }
-
-    let (balance_hours, balance_minutes) = utils::seconds_to_hours_and_minutes(r.balance);
-    table_builder.push_record([
-        "Work time balance",
-        &format!("{}+", r.balance_days()),
-        &format!("{balance_hours} hours, {balance_minutes} minutes"),
-    ]);
-
-    let mut table = table_builder.build();
-    table
-        .with(Style::modern_rounded())
-        .with(ColumnNames::default().color(Color::FG_GREEN));
-    table
 }
 
 #[tokio::main]
@@ -399,6 +258,8 @@ async fn main() -> Result<(), Error> {
         Token::new(&env::var("TOKEN")?)
     };
 
+    let extra_settings = GlobalSettings::create_settings().await;
+
     let cache_date = get_cache_first_date(&token)?;
     let since_date = args
         .start_date
@@ -409,6 +270,7 @@ async fn main() -> Result<(), Error> {
     let mut spinner = Spinner::new(Spinners::Moon, "Fetching user...".into());
     let time = Instant::now();
     let client = ClockifyClient::new(&token)?;
+    let user_settings = extra_settings.get_user_settings(&client.user.email);
     spinner.stop_with_message(format!(
         "User fetched from Clockify API! ({:.2} s)",
         time.elapsed().as_secs_f32()
@@ -432,6 +294,7 @@ async fn main() -> Result<(), Error> {
         days_off,
         args.include_today,
         start_balance,
+        user_settings,
     )?;
     spinner.stop_with_message(format!(
         "Items calculated! ({:.2} s)\n",

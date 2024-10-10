@@ -21,6 +21,9 @@ pub(crate) struct Args {
     /// Optional start balance in minutes
     #[arg(short = 'b', long, requires = "start_date")]
     pub start_balance: Option<i64>,
+
+    #[arg(long, default_value = "false")]
+    pub extra_settings: bool,
 }
 
 fn validate_date(s: &str) -> Result<NaiveDate, Error> {

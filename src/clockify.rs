@@ -1,3 +1,5 @@
+use crate::models::{Day, Holiday, HolidayType, SickLeaveDay, WorkDay, WorkItem};
+use crate::utils;
 use anyhow::Error;
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeDelta, TimeZone, Utc};
 use futures::future::join_all;
@@ -7,6 +9,8 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+use std::fs::File;
+use std::io::Write;
 use std::{fmt, thread, time};
 use url::Url;
 
@@ -52,14 +56,14 @@ where
 }
 
 #[derive(Deserialize, Clone, Debug)]
-struct User {
+pub(crate) struct User {
     #[serde(deserialize_with = "str_hex_to_u128")]
     id: u128,
     #[serde(rename(deserialize = "activeWorkspace"))]
     #[serde(deserialize_with = "str_hex_to_u128")]
     workspace: u128,
     name: String,
-    email: String,
+    pub(crate) email: String,
 }
 
 impl User {
@@ -100,7 +104,7 @@ fn get_datetime_field<E: serde::de::Error>(
         .ok_or_else(|| E::missing_field(field))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(crate) struct TimeEntry {
     pub description: String,
     pub project_name: String,
@@ -141,7 +145,7 @@ impl<'de> Deserialize<'de> for TimeEntry {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) enum TimeOffType {
     DayOff,
     SickLeave,
@@ -149,7 +153,7 @@ pub(crate) enum TimeOffType {
     ParentalLeave,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct TimeOffItem {
     pub note: String,
     pub user_id: String,
@@ -215,7 +219,7 @@ impl<'de> Deserialize<'de> for TimeOffItem {
 #[derive(Clone, Debug)]
 pub(crate) struct ClockifyClient {
     base_url: &'static Url,
-    user: User,
+    pub(crate) user: User,
     client: Client,
 }
 
@@ -353,6 +357,14 @@ impl ClockifyClient {
             jsons.push(result.unwrap())
         }
 
+        let datat = serde_json::to_string_pretty(&jsons).unwrap();
+
+        // Open the file in write mode
+        let mut file = File::create("janssoni.json")?;
+
+        // Write the JSON string to the file
+        file.write_all(datat.as_bytes())?;
+
         Ok(jsons.into_iter().flatten().collect())
     }
 
@@ -407,6 +419,75 @@ impl ClockifyClient {
             }
         }
 
+        let datat = serde_json::to_string_pretty(&time_off_items).unwrap();
+
+        // Open the file in write mode
+        let mut file = File::create("janssoni_other.json")?;
+
+        // Write the JSON string to the file
+        file.write_all(datat.as_bytes())?;
+
         Ok(time_off_items)
     }
+}
+
+pub(crate) async fn get_working_days(
+    client: ClockifyClient,
+    since: &NaiveDate,
+) -> Result<Vec<WorkDay>, Error> {
+    let work_items = client.get_work_items_since(since).await?;
+    let work_days = work_items
+        .into_iter()
+        .chunk_by(|wi| wi.start.date_naive())
+        .into_iter()
+        .map(|(date, group)| {
+            let work_items = group.map(WorkItem::from).collect();
+            WorkDay::new(date, work_items)
+        })
+        .collect::<Vec<WorkDay>>();
+
+    Ok(work_days)
+}
+
+pub(crate) async fn get_days_off(
+    client: ClockifyClient,
+    since: &NaiveDate,
+) -> Result<Vec<Day>, Error> {
+    let items = client.get_time_off_items().await?;
+    let days_off = items
+        .into_iter()
+        .flat_map(|toi| {
+            // TODO support users datetime
+            // Use date_naive because:
+            // "start": "2024-01-30T22:00:00Z",
+            // "end": "2024-01-31T21:59:59.999Z"
+            let start = toi.start.date_naive();
+            let end = toi.end.date_naive();
+            let mut days_off = Vec::new();
+            for date in utils::DateRange(start + TimeDelta::days(1), end).filter(|d| d >= since) {
+                let note = toi.note.clone();
+                let day_off = match toi.type_ {
+                    TimeOffType::SickLeave => {
+                        let day = SickLeaveDay::new(note, date);
+                        Day::Sick(day)
+                    }
+                    TimeOffType::Vacation => {
+                        let day = Holiday::new(String::new(), date, HolidayType::Vacation);
+                        Day::Holiday(day)
+                    }
+                    TimeOffType::ParentalLeave => {
+                        let day = Holiday::new(String::new(), date, HolidayType::ParentalLeave);
+                        Day::Holiday(day)
+                    }
+                    TimeOffType::DayOff => {
+                        let day = Holiday::new(String::new(), date, HolidayType::Flex);
+                        Day::Holiday(day)
+                    }
+                };
+                days_off.push(day_off);
+            }
+            days_off
+        })
+        .collect::<Vec<Day>>();
+    Ok(days_off)
 }
