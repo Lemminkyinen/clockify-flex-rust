@@ -28,9 +28,6 @@ pub(crate) struct Args {
     #[arg(short = 'b', long, requires = "start_date")]
     pub start_balance: Option<i64>,
 
-    #[arg(long, default_value = "false")]
-    pub extra_settings: bool,
-
     /// Enable debug features, such as saving clockify JSONs to disk.
     #[arg(long, default_value = "false")]
     pub debug: bool,

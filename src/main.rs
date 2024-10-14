@@ -258,7 +258,7 @@ async fn main() -> Result<(), Error> {
         Token::new(&env::var("TOKEN")?)
     };
 
-    let extra_settings = GlobalSettings::create_settings().await;
+    let extra_settings = GlobalSettings::create_settings().await?;
 
     let cache_date = get_cache_first_date(&token)?;
     let since_date = args
