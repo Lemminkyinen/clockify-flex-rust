@@ -19,8 +19,8 @@ use std::env;
 use std::time::Instant;
 use tokio::join;
 use utils::cache::{get_cache_first_date, set_cache_first_date};
-use utils::get_public_holidays;
 use utils::table::build_table;
+use utils::{get_public_holidays, setup_log};
 
 async fn get_items(
     client: ClockifyClient,
@@ -249,11 +249,14 @@ async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
 
     let args = get_settings().await;
+    setup_log(&args.log_output, &args.log_level)?;
 
     let token = if let Some(token) = &args.token {
         token
+    } else if let Ok(token) = &env::var("TOKEN") {
+        &Token::new(token)
     } else {
-        &Token::new(&env::var("TOKEN")?)
+        return Err(Error::msg("Clockify API token is missing! Please add your token to the .env file as 'TOKEN=your_token_here' or pass it using the -t argument."));
     };
 
     let extra_settings = GlobalSettings::create_settings().await?;

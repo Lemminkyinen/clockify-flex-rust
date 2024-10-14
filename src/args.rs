@@ -1,8 +1,9 @@
 use super::clockify::Token;
 use anyhow::Error;
 use chrono::{NaiveDate, Utc};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use lazy_static::lazy_static;
+use log::LevelFilter;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 lazy_static! {
@@ -27,9 +28,46 @@ pub(crate) struct Args {
     #[arg(short = 'b', long, requires = "start_date")]
     pub start_balance: Option<i64>,
 
+    /// Logging level
+    #[arg(long, default_value = "warn")]
+    pub log_level: LogLevel,
+
+    /// Logging output
+    #[arg(long, default_value = "file")]
+    pub log_output: LogOutput,
+
     /// Enable debug features, such as saving clockify JSONs to disk.
     #[arg(long, default_value = "false")]
     pub debug: bool,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub(crate) enum LogOutput {
+    Console,
+    File,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub(crate) enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+    None,
+}
+
+impl From<LogLevel> for LevelFilter {
+    fn from(val: LogLevel) -> Self {
+        match val {
+            LogLevel::Error => LevelFilter::Error,
+            LogLevel::Warn => LevelFilter::Warn,
+            LogLevel::Info => LevelFilter::Info,
+            LogLevel::Debug => LevelFilter::Debug,
+            LogLevel::Trace => LevelFilter::Trace,
+            LogLevel::None => LevelFilter::Off,
+        }
+    }
 }
 
 fn validate_date(s: &str) -> Result<NaiveDate, Error> {

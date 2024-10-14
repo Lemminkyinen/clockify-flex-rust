@@ -2,9 +2,14 @@ pub(crate) mod cache;
 pub(crate) mod file_io;
 pub(crate) mod table;
 
-use crate::{extra_settings::schema::ExtraSettings, models::Day};
+use crate::{
+    args::{LogLevel, LogOutput},
+    extra_settings::schema::ExtraSettings,
+    models::Day,
+};
 use anyhow::Error;
 use chrono::{Datelike, Duration, NaiveDate, Utc, Weekday};
+use env_logger::Target;
 use lazy_static::lazy_static;
 use serde::Serialize;
 use std::{mem, path::Path};
@@ -101,4 +106,21 @@ where
     let datat = serde_json::to_string_pretty(value)?;
     let mut file = File::create(path).await?;
     file.write_all(datat.as_bytes()).await.map_err(Error::from)
+}
+
+/// Setup logger
+pub(crate) fn setup_log(output: &LogOutput, level: &LogLevel) -> Result<(), Error> {
+    // TODO Async logger: https://docs.rs/tracing/0.1.40/tracing/
+    env_logger::builder()
+        .filter_level(level.clone().into())
+        .target(match output {
+            LogOutput::File => {
+                let log_file = std::fs::File::create(".log")?;
+                let boxed_log_file = Box::new(log_file);
+                Target::Pipe(boxed_log_file)
+            }
+            LogOutput::Console => Target::Stdout,
+        })
+        .init();
+    Ok(())
 }

@@ -5,3 +5,4 @@ debug_output.json
 .clockify-rust
 /*test*.json
 .settings.json
+.log
