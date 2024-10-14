@@ -355,7 +355,7 @@ impl ClockifyClient {
             jsons.push(result.unwrap())
         }
 
-        if get_settings().debug {
+        if get_settings().await.debug {
             let path = format!("work_items_{}.json", Utc::now().format("%Y%m%d%H%M%S"));
             if let Err(e) = json_to_disk(path, &jsons).await {
                 println!("Failed to save work items to disk! {e}")
@@ -416,7 +416,7 @@ impl ClockifyClient {
             }
         }
 
-        if get_settings().debug {
+        if get_settings().await.debug {
             let path = format!("work_items_{}.json", Utc::now().format("%Y%m%d%H%M%S"));
             if let Err(e) = json_to_disk(path, &time_off_items).await {
                 println!("Failed to time off items to disk! {e}")

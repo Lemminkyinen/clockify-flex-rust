@@ -1,4 +1,3 @@
-use crate::utils::table;
 use crate::{utils, Results};
 use tabled::builder::Builder;
 use tabled::settings::themes::ColumnNames;

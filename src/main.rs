@@ -5,9 +5,8 @@ mod models;
 mod utils;
 
 use anyhow::Error;
-use args::Args;
+use args::get_settings;
 use chrono::{Datelike, NaiveDate};
-use clap::Parser;
 use clockify::{get_days_off, get_working_days};
 use clockify::{ClockifyClient, Token};
 use extra_settings::schema::ExtraSettings;
@@ -249,18 +248,17 @@ fn calculate_results(
 async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
 
-    let args = Args::parse();
-    args.validate()?;
+    let args = get_settings().await;
 
-    let token = if let Some(token) = args.token {
+    let token = if let Some(token) = &args.token {
         token
     } else {
-        Token::new(&env::var("TOKEN")?)
+        &Token::new(&env::var("TOKEN")?)
     };
 
     let extra_settings = GlobalSettings::create_settings().await?;
 
-    let cache_date = get_cache_first_date(&token)?;
+    let cache_date = get_cache_first_date(token)?;
     let since_date = args
         .start_date
         .unwrap_or(cache_date.unwrap_or(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap()));
@@ -269,7 +267,7 @@ async fn main() -> Result<(), Error> {
 
     let mut spinner = Spinner::new(Spinners::Moon, "Fetching user...".into());
     let time = Instant::now();
-    let client = ClockifyClient::new(&token)?;
+    let client = ClockifyClient::new(token)?;
     let user_settings = extra_settings.get_user_settings(&client.user.email);
     spinner.stop_with_message(format!(
         "User fetched from Clockify API! ({:.2} s)",
@@ -303,7 +301,7 @@ async fn main() -> Result<(), Error> {
 
     // Save first day cache, if start_date was not given
     if args.start_date.is_none() {
-        set_cache_first_date(&token, &results.first_working_day)?;
+        set_cache_first_date(token, &results.first_working_day)?;
     }
 
     // TODO Support for first day even when the start_date is given

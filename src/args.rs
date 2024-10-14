@@ -1,13 +1,12 @@
-use std::sync::{RwLock, RwLockReadGuard};
-
 use super::clockify::Token;
 use anyhow::Error;
 use chrono::{NaiveDate, Utc};
 use clap::Parser;
 use lazy_static::lazy_static;
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 lazy_static! {
-    static ref SETTINGS: RwLock<Args> = RwLock::new(Args::parse());
+    static ref SETTINGS: RwLock<Args> = RwLock::new(Args::parse_validate());
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -50,7 +49,7 @@ fn validate_date(s: &str) -> Result<NaiveDate, Error> {
 }
 
 impl Args {
-    pub(crate) fn validate(&self) -> Result<(), clap::Error> {
+    fn validate(&self) -> Result<(), clap::Error> {
         let today = Utc::now().date_naive();
         if self.start_date == Some(today) && !self.include_today {
             println!("If start_date is today, --include-today option must be used.");
@@ -58,8 +57,18 @@ impl Args {
         }
         Ok(())
     }
+
+    /// Parse and validate arguments
+    pub(crate) fn parse_validate() -> Self {
+        let args = Self::parse();
+        if let Err(e) = args.validate() {
+            println!("{e}");
+            std::process::exit(1);
+        };
+        args
+    }
 }
 
-pub(crate) fn get_settings() -> RwLockReadGuard<'static, Args> {
-    SETTINGS.read().unwrap()
+pub(crate) async fn get_settings() -> RwLockReadGuard<'static, Args> {
+    SETTINGS.read().await
 }
