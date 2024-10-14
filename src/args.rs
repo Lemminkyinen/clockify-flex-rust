@@ -1,8 +1,14 @@
+use std::sync::{RwLock, RwLockReadGuard};
+
+use super::clockify::Token;
 use anyhow::Error;
 use chrono::{NaiveDate, Utc};
 use clap::Parser;
+use lazy_static::lazy_static;
 
-use crate::clockify::Token;
+lazy_static! {
+    static ref SETTINGS: RwLock<Args> = RwLock::new(Args::parse());
+}
 
 #[derive(Parser, Debug, Clone)]
 pub(crate) struct Args {
@@ -24,6 +30,10 @@ pub(crate) struct Args {
 
     #[arg(long, default_value = "false")]
     pub extra_settings: bool,
+
+    /// Enable debug features, such as saving clockify JSONs to disk.
+    #[arg(long, default_value = "false")]
+    pub debug: bool,
 }
 
 fn validate_date(s: &str) -> Result<NaiveDate, Error> {
@@ -51,4 +61,8 @@ impl Args {
         }
         Ok(())
     }
+}
+
+pub(crate) fn get_settings() -> RwLockReadGuard<'static, Args> {
+    SETTINGS.read().unwrap()
 }

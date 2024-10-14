@@ -1,5 +1,6 @@
+use crate::args::get_settings;
 use crate::models::{Day, Holiday, HolidayType, SickLeaveDay, WorkDay, WorkItem};
-use crate::utils;
+use crate::utils::{self, json_to_disk};
 use anyhow::Error;
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeDelta, TimeZone, Utc};
 use futures::future::join_all;
@@ -323,8 +324,6 @@ impl ClockifyClient {
                             .get("transfer-encoding")
                             .map(|v| v.to_str().map_err(Error::msg));
 
-                        // println!("status code: {:?}", res.status().as_u16());
-                        // println!("headers: {:?}", res.headers());
                         if let Some(Ok(encoding)) = transfer_encoding {
                             if encoding == "chunked" {
                                 responses.push(res);
@@ -332,7 +331,6 @@ impl ClockifyClient {
                             }
                         }
                         if let Some(Ok(cont_len)) = cont_len {
-                            // println!("cont_len {:?}", cont_len);
                             if !["0", "2"].contains(&cont_len) {
                                 responses.push(res);
                             }
@@ -357,13 +355,12 @@ impl ClockifyClient {
             jsons.push(result.unwrap())
         }
 
-        let datat = serde_json::to_string_pretty(&jsons).unwrap();
-
-        // Open the file in write mode
-        let mut file = File::create("janssoni.json")?;
-
-        // Write the JSON string to the file
-        file.write_all(datat.as_bytes())?;
+        if get_settings().debug {
+            let path = format!("work_items_{}.json", Utc::now().format("%Y%m%d%H%M%S"));
+            if let Err(e) = json_to_disk(path, &jsons).await {
+                println!("Failed to save work items to disk! {e}")
+            };
+        }
 
         Ok(jsons.into_iter().flatten().collect())
     }
@@ -419,13 +416,12 @@ impl ClockifyClient {
             }
         }
 
-        let datat = serde_json::to_string_pretty(&time_off_items).unwrap();
-
-        // Open the file in write mode
-        let mut file = File::create("janssoni_other.json")?;
-
-        // Write the JSON string to the file
-        file.write_all(datat.as_bytes())?;
+        if get_settings().debug {
+            let path = format!("work_items_{}.json", Utc::now().format("%Y%m%d%H%M%S"));
+            if let Err(e) = json_to_disk(path, &time_off_items).await {
+                println!("Failed to time off items to disk! {e}")
+            };
+        }
 
         Ok(time_off_items)
     }

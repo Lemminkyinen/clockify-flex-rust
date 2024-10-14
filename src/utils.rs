@@ -2,14 +2,13 @@ pub(crate) mod cache;
 pub(crate) mod file_io;
 pub(crate) mod table;
 
-use crate::{
-    extra_settings::{self, schema::ExtraSettings},
-    models::Day,
-};
+use crate::{extra_settings::schema::ExtraSettings, models::Day};
 use anyhow::Error;
 use chrono::{Datelike, Duration, NaiveDate, Utc, Weekday};
 use lazy_static::lazy_static;
-use std::mem;
+use serde::Serialize;
+use std::{mem, path::Path};
+use tokio::{fs::File, io::AsyncWriteExt};
 
 lazy_static! {
     pub(crate) static ref WORK_DAY_HOURS: f32 = 7.5;
@@ -92,4 +91,14 @@ pub(crate) async fn get_public_holidays(since: &NaiveDate) -> Result<Vec<Day>, E
         .into_iter()
         .filter(|d| is_weekday(&d.date()) && &d.date() >= since)
         .collect())
+}
+
+pub(crate) async fn json_to_disk<T, P>(path: P, value: &T) -> Result<(), Error>
+where
+    T: ?Sized + Serialize,
+    P: AsRef<Path>,
+{
+    let datat = serde_json::to_string_pretty(value)?;
+    let mut file = File::create(path).await?;
+    file.write_all(datat.as_bytes()).await.map_err(Error::from)
 }
