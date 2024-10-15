@@ -10,9 +10,9 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use std::fs::File;
-use std::io::Write;
+use std::time::Duration;
 use std::{fmt, thread, time};
+use tokio::time::sleep;
 use url::Url;
 
 lazy_static! {
@@ -234,9 +234,24 @@ impl ClockifyClient {
         let client_ = client.clone();
 
         let user = tokio::task::block_in_place(move || {
-            tokio::runtime::Handle::current()
-                .block_on(async move { get_user(client_, token_).await.unwrap() })
-        });
+            tokio::runtime::Handle::current().block_on(async move {
+                let mut attempts = 0u8;
+                loop {
+                    match get_user(client_.clone(), token_).await {
+                        Ok(user) => return Ok(user),
+                        Err(e) if attempts < 3 => {
+                            log::error!("Failed to get user from clockify API: {e}");
+                            attempts += 1;
+                            sleep(Duration::from_secs(2)).await;
+                        }
+                        Err(e) => {
+                            log::error!("Failed to get user from clockify API three times: {e}");
+                            return Err(e);
+                        }
+                    }
+                }
+            })
+        })?;
 
         Ok(ClockifyClient {
             user,
