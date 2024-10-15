@@ -12,7 +12,7 @@ use chrono::{Datelike, Duration, NaiveDate, Utc, Weekday};
 use env_logger::Target;
 use lazy_static::lazy_static;
 use serde::Serialize;
-use std::{mem, path::Path};
+use std::{fs::OpenOptions, mem, path::Path};
 use tokio::{fs::File, io::AsyncWriteExt};
 
 lazy_static! {
@@ -115,7 +115,10 @@ pub(crate) fn setup_log(output: &LogOutput, level: &LogLevel) -> Result<(), Erro
         .filter_level(level.clone().into())
         .target(match output {
             LogOutput::File => {
-                let log_file = std::fs::File::create(".log")?;
+                let log_file = OpenOptions::new()
+                    .append(true) // Open in append mode
+                    .create(true) // Create the file if it doesn't exist
+                    .open(".log")?;
                 let boxed_log_file = Box::new(log_file);
                 Target::Pipe(boxed_log_file)
             }
