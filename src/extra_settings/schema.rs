@@ -43,6 +43,14 @@ pub(crate) struct ExtraSettings {
 }
 
 impl ExtraSettings {
+    pub(crate) fn empty() -> Self {
+        Self {
+            email: String::with_capacity(0),
+            ignore_items: Vec::with_capacity(0),
+            expected_working_hours: Vec::with_capacity(0),
+        }
+    }
+
     pub(crate) fn is_ignored(&self, day: &Day) -> bool {
         let asd = self.ignore_items.iter().any(|item| {
             item.date_start <= day.date()

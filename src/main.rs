@@ -94,7 +94,7 @@ fn calculate_results(
     mut days_off: Vec<Day>,
     include_today: bool,
     start_balance: i64,
-    user_settings: Option<ExtraSettings>,
+    user_settings: ExtraSettings,
 ) -> Result<Results, Error> {
     let first_working_day = working_days
         .iter()
@@ -119,25 +119,23 @@ fn calculate_results(
         .ok_or(Error::msg("Days iterator is empty!"))?
         .to_owned();
 
-    let public_holidays = public_holidays.into_iter().filter(|day| {
-        let date = day.date();
-        utils::not_in_future(&date) && utils::is_weekday(&date) && first_working_day < date
-    });
-
-    // Filter out ignore items
-    let public_holidays_filtered = if let Some(settings) = &user_settings {
-        public_holidays
-            .filter(|day| !settings.is_ignored(day))
-            .collect_vec()
-    } else {
-        public_holidays.collect_vec()
-    };
-
-    let public_holidays = public_holidays_filtered
+    let public_holidays_filtered = public_holidays
         .into_iter()
-        .map(|d| d.date())
+        .filter_map(|day| {
+            let date = day.date();
+            if utils::not_in_future(&date)
+                && utils::is_weekday(&date)
+                && first_working_day < date
+                && !user_settings.is_ignored(&day)
+            {
+                Some(date)
+            } else {
+                None
+            }
+        })
         .collect_vec();
-    let public_holiday_count = public_holidays.len();
+
+    let public_holiday_count = public_holidays_filtered.len();
 
     let (sick_leave_days, time_off_days): (Vec<Day>, Vec<Day>) = days_off
         .into_iter()
@@ -156,11 +154,8 @@ fn calculate_results(
     let parental_leave_days = parental_leave_days
         .into_iter()
         .filter_map(|d| {
-            if let Some(settings) = &user_settings {
-                // Ignore weekends and settings.is_ignored
-                if !utils::is_weekday(&d.date()) || settings.is_ignored(&d) {
-                    return None;
-                }
+            if !utils::is_weekday(&d.date()) || user_settings.is_ignored(&d) {
+                return None;
             }
             Some(Day::into_date(d))
         })
@@ -175,10 +170,8 @@ fn calculate_results(
     let vacation_days = vacation_days
         .into_iter()
         .filter_map(|d| {
-            if let Some(settings) = &user_settings {
-                if !utils::is_weekday(&d.date()) || settings.is_ignored(&d) {
-                    return None;
-                }
+            if !utils::is_weekday(&d.date()) || user_settings.is_ignored(&d) {
+                return None;
             }
             Some(Day::into_date(d))
         })
@@ -194,10 +187,8 @@ fn calculate_results(
         time_off_days
             .into_iter()
             .filter_map(|d| {
-                if let Some(settings) = &user_settings {
-                    if !utils::is_weekday(&d.date()) || settings.is_ignored(&d) {
-                        return None;
-                    }
+                if !utils::is_weekday(&d.date()) || user_settings.is_ignored(&d) {
+                    return None;
                 }
                 Some(Day::into_date(d))
             })
@@ -208,7 +199,7 @@ fn calculate_results(
     let filtered_expected_working_days = all_weekdays
         .into_iter()
         .filter(|day| {
-            !public_holidays.contains(day)
+            !public_holidays_filtered.contains(day)
                 && !sick_leave_days.contains(day)
                 && !held_vacation_days.contains(day)
                 && !parental_leave_days.contains(day)
@@ -217,7 +208,7 @@ fn calculate_results(
 
     let filtered_expected_working_day_count = filtered_expected_working_days.len();
     let expected_working_time_sec =
-        utils::workdays_to_secs(filtered_expected_working_days, &user_settings);
+        utils::workdays_to_secs(filtered_expected_working_days, &Some(user_settings));
     let flex_time_off_sec = utils::days_to_secs(held_flex_time_off_day_count);
     let total_worked_time_sec = working_days.iter().map(|wd| wd.duration()).sum::<i64>();
     let working_day_count = working_days.len();
@@ -271,7 +262,11 @@ async fn main() -> Result<(), Error> {
     let mut spinner = Spinner::new(Spinners::Moon, "Fetching user...".into());
     let time = Instant::now();
     let client = ClockifyClient::new(token)?;
-    let user_settings = extra_settings.get_user_settings(&client.user.email);
+
+    // Set empty options if not found.
+    let user_settings = extra_settings
+        .get_user_settings(&client.user.email)
+        .unwrap_or(ExtraSettings::empty());
     spinner.stop_with_message(format!(
         "User fetched from Clockify API! ({:.2} s)",
         time.elapsed().as_secs_f32()
