@@ -52,15 +52,15 @@ impl ExtraSettings {
     }
 
     pub(crate) fn is_ignored(&self, day: &Day) -> bool {
-        let asd = self.ignore_items.iter().any(|item| {
+        let ignored = self.ignore_items.iter().any(|item| {
             item.date_start <= day.date()
                 && item.date_end >= day.date()
                 && day.type_() == item.type_
         });
-        if asd {
-            println!("Ignore day: {:?}", day)
+        if ignored {
+            log::info!("Ignore day: {:?}", day)
         }
-        asd
+        ignored
     }
 
     /// Return expected working seconds, if expectedWorkingHours is preset for the day

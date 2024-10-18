@@ -78,11 +78,6 @@ pub(crate) fn build_table(r: Results, start_balance: Option<i64>) -> Table {
             Some(r.working_day_count),
             Some(r.worked_time),
         ),
-        (
-            "Total working time (held flex hours deducted)",
-            Some(r.working_day_count),
-            Some(r.filtered_worked_time()),
-        ),
     ];
 
     for item in items {

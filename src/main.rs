@@ -78,10 +78,6 @@ impl Results {
         self.working_day_count + self.sick_leave_day_count
     }
 
-    fn filtered_worked_time(&self) -> i64 {
-        self.worked_time - utils::days_to_secs(self.held_flex_time_off_day_count)
-    }
-
     fn balance_days(&self) -> i64 {
         let denominator_seconds = (*utils::WORK_DAY_HOURS * 3600.0f32) as i64;
         self.balance / denominator_seconds
@@ -209,13 +205,11 @@ fn calculate_results(
     let filtered_expected_working_day_count = filtered_expected_working_days.len();
     let expected_working_time_sec =
         utils::workdays_to_secs(filtered_expected_working_days, &Some(user_settings));
-    let flex_time_off_sec = utils::days_to_secs(held_flex_time_off_day_count);
     let total_worked_time_sec = working_days.iter().map(|wd| wd.duration()).sum::<i64>();
     let working_day_count = working_days.len();
 
     let start_balance = 60i64 * start_balance;
-    let balance =
-        start_balance + total_worked_time_sec - expected_working_time_sec - flex_time_off_sec;
+    let balance = start_balance + total_worked_time_sec - expected_working_time_sec;
 
     Ok(Results {
         first_working_day,
