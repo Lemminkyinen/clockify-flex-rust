@@ -198,14 +198,6 @@ impl<'de> Deserialize<'de> for TimeOffItem {
         let start = get_datetime_field(period, "start")?;
         let end = get_datetime_field(period, "end")?;
 
-        // Assert that half day is false
-        let half_day = time_off_object
-            .get("halfDay")
-            .ok_or_else(|| serde::de::Error::missing_field("halfDay"))?
-            .as_bool()
-            .ok_or_else(|| serde::de::Error::custom("Expected boolean in halfDay"))?;
-        assert!(!half_day, "Half day is not supported!");
-
         Ok(TimeOffItem {
             note,
             type_,
