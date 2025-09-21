@@ -146,7 +146,7 @@ impl<'de> Deserialize<'de> for TimeEntry {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub(crate) enum TimeOffType {
     DayOff,
     SickLeave,

@@ -6,7 +6,7 @@ mod utils;
 
 use anyhow::Error;
 use args::get_settings;
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, NaiveDate, Weekday};
 use clockify::{get_days_off, get_working_days};
 use clockify::{ClockifyClient, Token};
 use extra_settings::schema::ExtraSettings;
@@ -138,6 +138,7 @@ fn calculate_results(
     let sick_leave_days = sick_leave_days
         .into_iter()
         .map(Day::into_date)
+        .filter(|d| ![Weekday::Sun, Weekday::Sat].contains(&d.weekday()))
         .collect_vec();
     let sick_leave_day_count = sick_leave_days.len();
 
