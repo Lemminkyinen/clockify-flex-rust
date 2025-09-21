@@ -31,10 +31,9 @@ async fn get_items(
     let days_off = get_days_off(client, &since);
     let (public_holidays, working_days, days_off) = join!(public_holidays, working_days, days_off);
     Ok((
-        public_holidays
-            .map_err(|e| Error::msg(format!("Failed to get public holidays: {:?}", e)))?,
-        working_days.map_err(|e| Error::msg(format!("Failed to get working days: {:?}", e)))?,
-        days_off.map_err(|e| Error::msg(format!("Failed to get fays off: {:?}", e)))?,
+        public_holidays.map_err(|e| Error::msg(format!("Failed to get public holidays: {e:?}")))?,
+        working_days.map_err(|e| Error::msg(format!("Failed to get working days: {e:?}")))?,
+        days_off.map_err(|e| Error::msg(format!("Failed to get fays off: {e:?}")))?,
     ))
 }
 

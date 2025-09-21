@@ -14,11 +14,11 @@ pub(crate) fn build_table(r: Results, start_balance: Option<i64>) -> Table {
 
         let hours_and_minutes_str = if let Some((hours, minutes)) = hours_and_minutes {
             let minutes = if minutes != 0 {
-                format!(", {} minutes", minutes)
+                format!(", {minutes} minutes")
             } else {
                 "".into()
             };
-            &format!("{} hours{}", hours, minutes)
+            &format!("{hours} hours{minutes}")
         } else {
             ""
         };
