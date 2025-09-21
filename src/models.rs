@@ -57,6 +57,18 @@ impl WorkDay {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+pub(crate) struct SelfImprovementDay {
+    title: String,
+    date: NaiveDate,
+}
+
+impl SelfImprovementDay {
+    pub(crate) fn new(title: String, date: NaiveDate) -> Self {
+        Self { title, date }
+    }
+}
+
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct WorkItem {
     description: String,
     project: String,
@@ -87,6 +99,7 @@ pub(crate) enum Day {
     Holiday(Holiday),
     Sick(SickLeaveDay),
     Work(WorkDay),
+    SelfImprovement(SelfImprovementDay),
 }
 
 impl Day {
@@ -95,6 +108,7 @@ impl Day {
             Self::Holiday(d) => d.date,
             Self::Sick(d) => d.date,
             Self::Work(d) => d.date,
+            Self::SelfImprovement(d) => d.date,
         }
     }
 
@@ -103,6 +117,7 @@ impl Day {
             Self::Holiday(d) => d.date,
             Self::Sick(d) => d.date,
             Self::Work(d) => d.date,
+            Self::SelfImprovement(d) => d.date,
         }
     }
 
@@ -117,6 +132,7 @@ impl Day {
             },
             Self::Sick(_) => DayType::SickLeave,
             Self::Work(_) => DayType::WorkingDay,
+            Self::SelfImprovement(_) => DayType::SelfImprovement,
         }
     }
 }

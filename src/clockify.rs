@@ -1,5 +1,7 @@
 use crate::args::get_settings;
-use crate::models::{Day, Holiday, HolidayType, SickLeaveDay, WorkDay, WorkItem};
+use crate::models::{
+    Day, Holiday, HolidayType, SelfImprovementDay, SickLeaveDay, WorkDay, WorkItem,
+};
 use crate::utils::{self, json_to_disk};
 use anyhow::Error;
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeDelta, TimeZone, Utc};
@@ -152,6 +154,7 @@ pub(crate) enum TimeOffType {
     SickLeave,
     Vacation,
     ParentalLeave,
+    SelfImprovementDay,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -179,6 +182,7 @@ impl<'de> Deserialize<'de> for TimeOffItem {
             "Sick leave" => TimeOffType::SickLeave,
             "Vacation" => TimeOffType::Vacation,
             "Parental leave" => TimeOffType::ParentalLeave,
+            "Seravo Self-Improvement Day" => TimeOffType::SelfImprovementDay,
             x => return Err(serde::de::Error::custom(format!("unknown policyName: {x}"))),
         };
 
@@ -380,7 +384,7 @@ impl ClockifyClient {
         let body = &serde_json::json!({
             "page": 1,
             "pageSize": 500,
-            "status": ["APPROVED"],
+            "status": ["ALL"],
             "users": {
                 "contains": "CONTAINS",
                 "ids": [self.user.id_str()],
@@ -485,6 +489,10 @@ pub(crate) async fn get_days_off(
                     TimeOffType::DayOff => {
                         let day = Holiday::new(String::new(), date, HolidayType::Flex);
                         Day::Holiday(day)
+                    }
+                    TimeOffType::SelfImprovementDay => {
+                        let day = SelfImprovementDay::new(String::new(), date);
+                        Day::SelfImprovement(day)
                     }
                 };
                 days_off.push(day_off);

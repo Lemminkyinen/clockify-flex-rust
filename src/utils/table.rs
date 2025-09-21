@@ -69,7 +69,12 @@ pub(crate) fn build_table(r: Results, start_balance: Option<i64>) -> Table {
         ),
         ("Sick leave time", Some(r.sick_leave_day_count), None),
         (
-            "Expected working time (sick leaves & public holidays deducted)",
+            "Self improvement days",
+            Some(r.self_improvement_days_count),
+            None,
+        ),
+        (
+            "Expected working time (sick leaves, public holidays, self-imp days deducted)",
             Some(r.filtered_expected_working_day_count),
             Some(r.expected_working_time_sec),
         ),

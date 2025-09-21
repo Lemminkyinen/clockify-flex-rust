@@ -38,6 +38,7 @@ async fn get_items(
 }
 
 struct Results {
+    self_improvement_days_count: usize,
     first_working_day: NaiveDate,
     working_day_count: usize,
     worked_time: i64,
@@ -103,7 +104,9 @@ fn calculate_results(
         working_days.retain(|wd| wd.date < today);
         public_holidays.retain(|phd| phd.date() < today);
         days_off.retain(|do_| {
-            matches!(do_, Day::Holiday(_)) || matches!(do_, Day::Sick(_)) && do_.date() < today
+            matches!(do_, Day::Holiday(_))
+                || matches!(do_, Day::Sick(_))
+                || matches!(do_, Day::SelfImprovement(_)) && do_.date() < today
         });
         all_weekdays.retain(|d| d < &today)
     }
@@ -135,6 +138,13 @@ fn calculate_results(
     let (sick_leave_days, time_off_days): (Vec<Day>, Vec<Day>) = days_off
         .into_iter()
         .partition(|day| matches!(day, Day::Sick(_)));
+
+    let (self_imp_days, time_off_days): (Vec<Day>, Vec<Day>) = time_off_days
+        .into_iter()
+        .partition(|day| matches!(day, Day::SelfImprovement(_)));
+    let self_imp_days = self_imp_days.into_iter().map(Day::into_date).collect_vec();
+    let self_improvement_days_count = self_imp_days.len();
+
     let sick_leave_days = sick_leave_days
         .into_iter()
         .map(Day::into_date)
@@ -199,6 +209,7 @@ fn calculate_results(
                 && !sick_leave_days.contains(day)
                 && !held_vacation_days.contains(day)
                 && !parental_leave_days.contains(day)
+                && !self_imp_days.contains(day)
         })
         .collect_vec();
 
@@ -212,6 +223,7 @@ fn calculate_results(
     let balance = start_balance + total_worked_time_sec - expected_working_time_sec;
 
     Ok(Results {
+        self_improvement_days_count,
         first_working_day,
         working_day_count,
         public_holiday_count,

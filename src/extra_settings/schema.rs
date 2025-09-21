@@ -10,6 +10,7 @@ pub(crate) enum DayType {
     PublicHoliday,
     Vacation,
     Flex,
+    SelfImprovement,
     Unknown,
 }
 
