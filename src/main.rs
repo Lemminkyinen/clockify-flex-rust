@@ -209,7 +209,6 @@ fn calculate_results(
                 && !sick_leave_days.contains(day)
                 && !held_vacation_days.contains(day)
                 && !parental_leave_days.contains(day)
-                && !self_imp_days.contains(day)
         })
         .collect_vec();
 
